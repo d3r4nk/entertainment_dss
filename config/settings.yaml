@@ -1,0 +1,171 @@
+# =============================================================================
+# Entertainment_decision - project settings
+# Environment-specific secrets live in .env (git-ignored); see .env.example.
+# Everything here is non-secret and safe to commit.
+# =============================================================================
+
+project:
+  name: Entertainment_decision
+  seed: 42
+
+# --- sampling profiles (section 3 of PROJECT_SPEC.md) ------------------------
+profiles:
+  # tiny: fast dev/test profile, must run the whole pipeline in a few minutes.
+  tiny:
+    max_items: 500            # per domain
+    max_users: 1000           # per domain
+    min_movie_ratings: 200    # >= ratings per movie in raw data
+    min_game_reviews: 50      # >= reviews per game in raw data
+    min_interactions_per_user: 10
+    min_positive_per_user: 4  # need >= 3 positives for train/val/test split
+
+  # default: real run profile.
+  default:
+    max_items: 10000          # top items by rating/review count
+    max_users: 20000
+    min_movie_ratings: 500    # spec: movies with >= 500 ratings
+    min_game_reviews: 500     # spec: games with >= 500 reviews
+    min_interactions_per_user: 20
+    min_positive_per_user: 5
+
+# --- completion of missing raw metadata --------------------------------------
+# games_metadata.json has no tags/description for many of the most popular games
+# (63% of the top 500 by review count). Their tags are transferred from the most
+# similar *tagged* games using co-review similarity computed on local data only.
+data_completion:
+  game_tag_propagation: true
+  top_neighbours: 8
+  min_similarity: 0.02    # cosine of the co-review vectors
+  min_support: 10         # shared users needed for a pair to count
+  min_lift: 1.0           # pair must be over-represented, not merely popular
+  max_items_per_user: 100 # drop power users that review everything
+
+# --- positive-interaction definition -----------------------------------------
+positive:
+  movie_min_rating: 4.0
+  game_requires_recommendation: true
+  game_min_hours: 0.0
+
+# --- train / validation / test split -----------------------------------------
+split:
+  # per user, ordered by timestamp ascending
+  test_from: -1      # last positive -> test
+  valid_from: -2     # second to last -> validation
+  min_positives: 4
+
+# --- taxonomy (section 6) -----------------------------------------------------
+taxonomy:
+  themes: 80                 # target number of clustered themes
+  min_tag_frequency: 3       # drop rare source tags before clustering
+  max_tags_for_clustering: 6000
+  movie_top_themes: 8        # top genome-derived themes kept per movie
+  game_top_themes: 10        # top Steam-tag-derived themes kept per game
+  movie_theme_min_relevance: 0.05
+  game_theme_min_weight: 0.0
+
+# --- nlp / embeddings (section 6) --------------------------------------------
+nlp:
+  embed_dim: 1024            # target dimension (dims parameter or truncate+renorm)
+  # Batch sizes are measured, not guessed. Ollama has ~3 s of fixed latency per
+  # request, so the spec's suggested 16-32 wasted most of the time: throughput is
+  # 4.3 docs/s at 16, 8.7 at 48, 12.1 at 128 (short texts). Documents are batched
+  # at 64 and tag names at 128. Lower them if VRAM becomes a problem.
+  embed_batch_size: 64
+  tag_embed_batch_size: 128
+  # qwen3-embedding context window: the dominant VRAM cost on a 4 GB GPU. 512 is
+  # enough for a ~400 token chunk and keeps more layers on the GPU (~50% faster).
+  embed_num_ctx: 512
+  chunk_max_tokens: 400      # approx tokens (words * 1.3)
+  chunk_target_tokens: 300
+  chunk_overlap_tokens: 50
+  words_to_tokens: 1.3
+  movie_top_text_tags: 15    # genome tags placed in the movie text
+  movie_top_user_tags: 10
+  game_top_text_tags: 15
+  query_instruction: "Instruct: Given a user request about movies or games, retrieve relevant items\nQuery: "
+  max_description_chars: 1200
+
+# --- graph (section 5) --------------------------------------------------------
+graph:
+  batch_size: 5000
+  similar_top_k: 10
+  similar_block_size: 2048   # items per block for the offline cosine pass
+  similar_min_score: 0.0     # keep top-k regardless, but drop below this
+
+# --- recommender + evaluation (section 7) ------------------------------------
+recsys:
+  top_k_report: [10, 20]
+  hit_rate_k: 10
+  diversity_k: 10
+  min_max_rank: 1
+
+evaluation:
+  k_values: [10, 20]
+  hit_rate_k: 10
+
+# --- hybrid weights -----------------------------------------------------------
+# This file always stays hand-edited: it holds the *fallback* weights (flat,
+# one block per profile, sums to ~1). The per-domain weights found by the
+# validation grid search (`python -m entdec --profile tiny recsys`) are written
+# to config/tuned_weights.yaml (generated, safe_dump, no comments) because
+# yaml.safe_dump would otherwise destroy this hand-edited file. The loader
+# prefers tuned_weights.yaml and falls back to the block below.
+hybrid_weights:
+  tiny:
+    popularity: 0.10
+    itemknn: 0.15
+    mf: 0.15
+    content: 0.25
+    kg: 0.35
+  default:
+    popularity: 0.10
+    itemknn: 0.15
+    mf: 0.15
+    content: 0.25
+    kg: 0.35
+
+# grid used by the weight tuner (coarse, keeps the search small)
+tuning:
+  step: 0.1
+  min_weight: 0.0
+  max_weight: 1.0
+  max_candidates: 400
+  sample_users: 500
+
+# --- llm / chatbot (section 8) ------------------------------------------------
+llm:
+  temperature: 0.2
+  intent_temperature: 0.0
+  num_ctx: 4096
+  think: false
+  max_tokens_answer: 700
+  request_timeout_s: 300
+  max_retries: 3
+  retrieval_k: 30
+  rerank_k: 10
+  default_language: vi
+
+# --- cross-domain personas (section 7) ----------------------------------------
+cross_domain:
+  top_k: 8
+  personas:
+    - name: "Inception -> games with a strong story"
+      source_domain: movie
+      liked_items: ["Inception (2010)"]
+      target_domain: game
+    - name: "The Witcher 3 -> open world movies"
+      source_domain: game
+      liked_items: ["The Witcher 3: Wild Hunt"]
+      target_domain: movie
+    - name: "Hades -> movies with the same style"
+      source_domain: game
+      liked_items: ["Hades"]
+      target_domain: movie
+    - name: "Black Swan -> psychological horror games"
+      source_domain: movie
+      liked_items: ["Black Swan (2010)"]
+      target_domain: game
+    - name: "Stardew Valley -> cosy movies"
+      source_domain: game
+      liked_items: ["Stardew Valley"]
+      target_domain: movie

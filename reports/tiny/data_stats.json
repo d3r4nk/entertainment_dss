@@ -1,0 +1,27 @@
+{
+  "profile": "tiny",
+  "movies": {
+    "n_items": 500,
+    "n_users": 1000,
+    "n_interactions": 340619,
+    "n_positives": 243297,
+    "splits": {
+      "train": 338619,
+      "valid": 1000,
+      "test": 1000
+    },
+    "files": {}
+  },
+  "games": {
+    "n_items": 500,
+    "n_users": 1000,
+    "n_interactions": 90411,
+    "n_positives": 81505,
+    "splits": {
+      "train": 88411,
+      "valid": 1000,
+      "test": 1000
+    },
+    "files": {}
+  }
+}

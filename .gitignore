@@ -1,0 +1,23 @@
+# --- raw + derived data (never commit) ---
+data/
+# --- secrets ---
+.env
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+# --- models / caches ---
+.cache/
+cache/
+.idea/
+.vscode/

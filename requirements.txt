@@ -1,0 +1,34 @@
+# --- core data wrangling ---
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+pyarrow>=15.0
+scipy>=1.12
+scikit-learn>=1.4
+
+# --- graph ---
+neo4j>=5.20
+
+# --- nlp / llm http ---
+httpx>=0.27
+
+# --- config / validation ---
+pydantic>=2.6
+pydantic-settings>=2.2
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# --- fuzzy matching ---
+rapidfuzz>=3.6
+
+# --- api + ui ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+streamlit>=1.33
+
+# --- quality ---
+pytest>=8.0
+ruff>=0.4
+
+# NOTE: `implicit` is optional (used for ALS-based MF when it installs cleanly on
+# Windows). When it is unavailable the MF model falls back to TruncatedSVD.
+# Install it manually with:  .venv\Scripts\python -m pip install implicit

@@ -1,0 +1,32 @@
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: entdec-neo4j
+    restart: unless-stopped
+    ports:
+      # Host ports 7474/7687 are already used by another local container on the
+      # development machine, so this project publishes different host ports.
+      # Keep these in sync with NEO4J_URI in .env.
+      - "7475:7474"   # HTTP browser
+      - "7688:7687"   # Bolt
+    environment:
+      # Password must be >= 8 chars. Override NEO4J_PASSWORD in .env.
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-entdecdevpass}"
+      NEO4J_server_memory_heap_initial__size: "2G"
+      NEO4J_server_memory_heap_max__size: "2G"
+      NEO4J_server_memory_pagecache_size: "2G"
+      NEO4J_server_default__listen__address: "0.0.0.0"
+    volumes:
+      # Named volumes (NOT Windows bind mounts) for predictable I/O.
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
