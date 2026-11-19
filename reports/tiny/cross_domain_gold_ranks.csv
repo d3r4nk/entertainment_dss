@@ -1,0 +1,43 @@
+source_domain,target_domain,source_item_id,target_item_id,movie_id,game_app_id,movie_title,game_title,relation_type,gold_bucket,confidence,rank_random,rank_popularity,rank_genre_only,rank_embedding_only,rank_theme_only,rank_full_system,rank_embedding_only_title_masked,rank_full_system_title_masked,title_mask_status
+movie,game,1214,214490,1214,214490,Alien,Alien: Isolation,franchise,franchise_adaptation,0.99,228,68,7,1,111,15,1,23,completed for 41 gold items
+game,movie,214490,1214,1214,214490,Alien,Alien: Isolation,franchise,franchise_adaptation,0.99,412,19,72,1,7,3,1,3,completed for 41 gold items
+movie,game,5952,241930,5952,241930,"Lord of the Rings: The Two Towers, The",Middle-earth™: Shadow of Mordor™,franchise,franchise_adaptation,0.97,468,13,8,2,46,11,2,11,completed for 41 gold items
+game,movie,241930,5952,5952,241930,"Lord of the Rings: The Two Towers, The",Middle-earth™: Shadow of Mordor™,franchise,franchise_adaptation,0.97,314,26,81,1,21,10,1,9,completed for 41 gold items
+movie,game,33794,35140,33794,35140,Batman Begins,Batman: Arkham Asylum Game of the Year Edition,franchise,franchise_adaptation,0.96,291,36,46,1,15,2,1,2,completed for 41 gold items
+game,movie,35140,33794,33794,35140,Batman Begins,Batman: Arkham Asylum Game of the Year Edition,franchise,franchise_adaptation,0.96,435,60,216,1,8,4,1,4,completed for 41 gold items
+movie,game,91529,208650,91529,208650,"Dark Knight Rises, The",Batman™: Arkham Knight,franchise,franchise_adaptation,0.96,63,32,71,1,38,10,6,30,completed for 41 gold items
+game,movie,208650,91529,91529,208650,"Dark Knight Rises, The",Batman™: Arkham Knight,franchise,franchise_adaptation,0.96,208,344,85,1,31,11,1,11,completed for 41 gold items
+movie,game,5349,1817070,5349,1817070,Spider-Man,Marvel’s Spider-Man Remastered,franchise,franchise_adaptation,0.98,324,334,388,1,43,11,2,17,completed for 41 gold items
+game,movie,1817070,5349,5349,1817070,Spider-Man,Marvel’s Spider-Man Remastered,franchise,franchise_adaptation,0.98,107,89,56,2,24,9,1,9,completed for 41 gold items
+movie,game,541,1091500,541,1091500,Blade Runner,Cyberpunk 2077,thematic,thematic,0.9,226,26,376,5,372,123,101,277,completed for 41 gold items
+game,movie,1091500,541,541,1091500,Blade Runner,Cyberpunk 2077,thematic,thematic,0.9,438,44,122,1,107,12,1,20,completed for 41 gold items
+movie,game,7143,814380,7143,814380,"Last Samurai, The",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,thematic,0.88,141,108,314,3,301,153,28,190,completed for 41 gold items
+game,movie,814380,7143,7143,814380,"Last Samurai, The",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,thematic,0.88,142,252,64,2,28,10,2,10,completed for 41 gold items
+movie,game,3578,214950,3578,214950,Gladiator,Total War: ROME II - Emperor Edition,thematic,thematic,0.86,109,376,385,2,334,110,15,156,completed for 41 gold items
+game,movie,214950,3578,3578,214950,Gladiator,Total War: ROME II - Emperor Edition,thematic,thematic,0.86,297,31,139,1,342,29,1,28,completed for 41 gold items
+movie,game,2028,231430,2028,231430,Saving Private Ryan,Company of Heroes 2,thematic,thematic,0.9,471,118,128,41,52,55,19,40,completed for 41 gold items
+game,movie,231430,2028,2028,231430,Saving Private Ryan,Company of Heroes 2,thematic,thematic,0.9,25,13,85,1,7,2,1,1,completed for 41 gold items
+movie,game,1201,1174180,1201,1174180,"Good, the Bad and the Ugly, The (Buono, il brutto, il cattivo, Il)",Red Dead Redemption 2,thematic,thematic,0.9,241,50,327,5,470,118,71,221,completed for 41 gold items
+game,movie,1174180,1201,1201,1174180,"Good, the Bad and the Ugly, The (Buono, il brutto, il cattivo, Il)",Red Dead Redemption 2,thematic,thematic,0.9,140,145,26,3,191,21,2,16,completed for 41 gold items
+movie,game,1208,50300,1208,50300,Apocalypse Now,Spec Ops: The Line,thematic,thematic,0.9,27,42,7,7,159,78,10,96,completed for 41 gold items
+game,movie,50300,1208,1208,50300,Apocalypse Now,Spec Ops: The Line,thematic,thematic,0.9,486,64,35,12,56,29,1,18,completed for 41 gold items
+movie,game,79132,870780,79132,870780,Inception,Control Ultimate Edition,thematic,thematic,0.86,274,134,83,20,455,148,5,132,completed for 41 gold items
+game,movie,870780,79132,79132,870780,Inception,Control Ultimate Edition,thematic,thematic,0.86,295,191,133,13,477,65,1,39,completed for 41 gold items
+movie,game,81591,108710,81591,108710,Black Swan,Alan Wake,thematic,thematic,0.8,476,37,3,3,197,101,1,91,completed for 41 gold items
+game,movie,108710,81591,81591,108710,Black Swan,Alan Wake,thematic,thematic,0.8,265,407,306,28,478,59,8,45,completed for 41 gold items
+movie,game,7361,282140,7361,282140,Eternal Sunshine of the Spotless Mind,SOMA,thematic,thematic,0.89,399,145,222,38,82,51,72,60,completed for 41 gold items
+game,movie,282140,7361,7361,282140,Eternal Sunshine of the Spotless Mind,SOMA,thematic,thematic,0.89,36,82,469,61,388,97,35,66,completed for 41 gold items
+movie,game,48774,282070,48774,282070,Children of Men,This War of Mine,thematic,thematic,0.85,477,92,420,186,170,164,109,131,completed for 41 gold items
+game,movie,282070,48774,48774,282070,Children of Men,This War of Mine,thematic,thematic,0.85,368,219,147,14,295,79,1,50,completed for 41 gold items
+movie,game,115713,1222140,115713,1222140,Ex Machina,Detroit: Become Human,thematic,thematic,0.92,353,220,451,6,486,141,81,294,completed for 41 gold items
+game,movie,1222140,115713,115713,1222140,Ex Machina,Detroit: Become Human,thematic,thematic,0.92,360,431,499,6,494,15,27,33,completed for 41 gold items
+movie,game,1258,739630,1258,739630,"Shining, The",Phasmophobia,thematic,thematic,0.82,280,285,90,63,130,109,25,78,completed for 41 gold items
+game,movie,739630,1258,1258,739630,"Shining, The",Phasmophobia,thematic,thematic,0.82,59,54,152,43,15,18,1,5,completed for 41 gold items
+movie,game,924,753640,924,753640,2001: A Space Odyssey,Outer Wilds,thematic,thematic,0.89,399,385,347,4,70,26,20,37,completed for 41 gold items
+game,movie,753640,924,924,753640,2001: A Space Odyssey,Outer Wilds,thematic,thematic,0.89,151,100,140,5,64,19,1,25,completed for 41 gold items
+movie,game,1527,1328670,1527,1328670,"Fifth Element, The",Mass Effect™ Legendary Edition,thematic,thematic,0.83,27,289,113,4,490,103,1,115,completed for 41 gold items
+game,movie,1328670,1527,1527,1328670,"Fifth Element, The",Mass Effect™ Legendary Edition,thematic,thematic,0.83,143,75,14,10,266,72,1,58,completed for 41 gold items
+movie,game,3996,814380,3996,814380,"Crouching Tiger, Hidden Dragon (Wo hu cang long)",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,thematic,0.88,24,108,318,40,301,169,9,134,completed for 41 gold items
+game,movie,814380,3996,3996,814380,"Crouching Tiger, Hidden Dragon (Wo hu cang long)",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,thematic,0.88,24,65,189,25,42,25,1,11,completed for 41 gold items
+movie,game,1997,238320,1997,238320,"Exorcist, The",Outlast,thematic,thematic,0.86,54,15,29,4,162,63,1,65,completed for 41 gold items
+game,movie,238320,1997,1997,238320,"Exorcist, The",Outlast,thematic,thematic,0.86,149,162,203,44,24,22,14,16,completed for 41 gold items
