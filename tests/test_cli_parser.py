@@ -11,3 +11,27 @@ def test_profile_is_preserved_before_or_after_subcommand() -> None:
 
     assert before.profile == "default"
     assert after.profile == "default"
+
+
+def test_crosseval_arguments_work_before_or_after_command() -> None:
+    parser = build_parser()
+
+    before = parser.parse_args(
+        ["--profile", "default", "crosseval", "--seeds", "20", "--k", "10"]
+    )
+    after = parser.parse_args(
+        ["crosseval", "--profile", "tiny", "--gold-only", "--no-title-mask-check"]
+    )
+
+    assert (before.command, before.profile, before.seeds, before.k) == (
+        "crosseval",
+        "default",
+        20,
+        10,
+    )
+    assert (after.command, after.profile, after.gold_only, after.no_title_mask_check) == (
+        "crosseval",
+        "tiny",
+        True,
+        True,
+    )

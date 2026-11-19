@@ -27,6 +27,7 @@ COMMAND_MODULES: dict[str, tuple[str, str]] = {
     "graph": ("entdec.graph.loader", "switch profiles and manage Neo4j graph dumps"),
     "recsys": ("entdec.recsys.evaluate", "train models, evaluate, tune weights"),
     "cross": ("entdec.recsys.cross_domain", "cross-domain persona recommendations"),
+    "crosseval": ("entdec.recsys.cross_eval", "evaluate cross-domain recommendation proxies"),
     "chat": ("entdec.chatbot.cli", "interactive chatbot (CLI)"),
     "api": ("entdec.api.main", "serve the FastAPI app"),
     "ui": ("entdec.ui.app", "run the Streamlit UI"),
@@ -79,6 +80,12 @@ _EXTRA_ARGS: dict[str, list[tuple[tuple[str, ...], dict]]] = {
     ],
     "cross": [
         (("--top-k",), {"type": int, "default": None, "help": "results per persona"}),
+    ],
+    "crosseval": [
+        (("--seeds",), {"type": int, "default": 1000, "help": "source seed items per direction"}),
+        (("--k",), {"type": int, "default": 10, "help": "report this cutoff alongside 5 and 20"}),
+        (("--gold-only",), {"action": "store_true", "help": "evaluate only curated gold pairs"}),
+        (("--no-title-mask-check",), {"action": "store_true", "help": "skip gold title-masked re-embedding"}),
     ],
     "chat": [
         (("--question",), {"type": str, "default": None, "help": "ask one question and exit"}),

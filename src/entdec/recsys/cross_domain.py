@@ -17,7 +17,7 @@ import pandas as pd
 
 from entdec.config import Config
 from entdec.logging_setup import get_logger
-from entdec.recsys.common import DOMAINS, load_domain
+from entdec.recsys.common import DOMAINS, DomainData, load_domain
 from entdec.recsys.kg_scoring import item_theme_vectors
 
 logger = get_logger(__name__)
@@ -33,6 +33,146 @@ class CrossDomainResult:
     theme_score: float
     embedding_score: float
     shared_themes: list[str]
+
+
+@dataclass
+class CrossDomainScores:
+    """Raw theme, embedding, and combined cross-domain scores."""
+
+    theme_profiles: np.ndarray
+    theme_scores: np.ndarray
+    embedding_scores: np.ndarray
+    combined_scores: np.ndarray
+
+
+class CrossDomainScorer:
+    """Vectorized implementation of the scoring used by the ``cross`` command."""
+
+    def __init__(self, source: DomainData, target: DomainData) -> None:
+        self.source = source
+        self.target = target
+        self.source_vectors = item_theme_vectors(source)
+        self.target_vectors = item_theme_vectors(target)
+        self.theme_names = sorted(
+            {theme for vector in self.source_vectors.values() for theme in vector}
+            | {theme for vector in self.target_vectors.values() for theme in vector}
+        )
+        self.theme_positions = {theme: pos for pos, theme in enumerate(self.theme_names)}
+        self.target_theme_matrix = self._theme_matrix(
+            target.catalog, self.target_vectors, self.theme_positions
+        )
+        n_themed = max(1, sum(bool(vector) for vector in self.target_vectors.values()))
+        document_frequency = np.zeros(len(self.theme_names), dtype=np.float64)
+        for vector in self.target_vectors.values():
+            for theme in vector:
+                document_frequency[self.theme_positions[theme]] += 1
+        self.theme_idf = np.zeros(len(self.theme_names), dtype=np.float64)
+        present = document_frequency > 0
+        self.theme_idf[present] = np.log(n_themed / document_frequency[present])
+        self.weighted_target_themes = self.target_theme_matrix * self.theme_idf
+
+    @staticmethod
+    def _theme_matrix(
+        catalog: list[int],
+        vectors: dict[int, dict[str, float]],
+        positions: dict[str, int],
+    ) -> np.ndarray:
+        matrix = np.zeros((len(catalog), len(positions)), dtype=np.float64)
+        for row, item_id in enumerate(catalog):
+            for theme, weight in vectors.get(int(item_id), {}).items():
+                matrix[row, positions[theme]] = float(weight)
+        return matrix
+
+    def score_sources(
+        self,
+        source_ids: list[int],
+        *,
+        source_embedding_overrides: dict[int, np.ndarray] | None = None,
+        target_embedding_overrides: dict[int, np.ndarray] | None = None,
+    ) -> CrossDomainScores:
+        """Score source items against the entire target catalogue.
+
+        Overrides support the title-masked gold-pair diagnostic without mutating
+        the cached catalogue embeddings.
+        """
+        embedding_dim = (
+            self.target.embeddings.shape[1] if self.target.embeddings is not None else 0
+        )
+        profiles = np.zeros((len(source_ids), len(self.theme_names)), dtype=np.float64)
+        embedding_profiles = np.zeros((len(source_ids), embedding_dim), dtype=np.float32)
+        for row, item_id in enumerate(source_ids):
+            vector = self.source_vectors.get(int(item_id), {})
+            for theme, weight in vector.items():
+                profiles[row, self.theme_positions[theme]] += float(weight)
+            total = profiles[row].sum()
+            if total > 0:
+                profiles[row] /= total
+
+            position = self.source.item_pos(int(item_id))
+            if position is not None and self.source.embeddings is not None:
+                override = (source_embedding_overrides or {}).get(int(item_id))
+                embedding_profiles[row] = (
+                    override if override is not None else self.source.embeddings[position]
+                )
+        norms = np.linalg.norm(embedding_profiles, axis=1, keepdims=True)
+        embedding_profiles /= np.where(norms > 0, norms, 1.0)
+
+        theme_scores = profiles @ self.weighted_target_themes.T
+        target_embeddings = self.target.embeddings
+        embedding_scores = np.zeros(
+            (len(source_ids), len(self.target.catalog)), dtype=np.float64
+        )
+        if target_embeddings is not None and embedding_profiles.shape[1]:
+            if target_embedding_overrides:
+                target_embeddings = target_embeddings.copy()
+                for item_id, vector in target_embedding_overrides.items():
+                    position = self.target.item_pos(item_id)
+                    if position is not None:
+                        target_embeddings[position] = vector
+            embedding_scores = embedding_profiles @ target_embeddings.T
+
+        theme_max = theme_scores.max(axis=1, keepdims=True)
+        embedding_max = embedding_scores.max(axis=1, keepdims=True)
+        normalised_themes = np.divide(
+            theme_scores,
+            theme_max,
+            out=theme_scores.copy(),
+            where=theme_max > 0,
+        )
+        normalised_embeddings = np.divide(
+            embedding_scores,
+            embedding_max,
+            out=embedding_scores.copy(),
+            where=embedding_max > 0,
+        )
+        combined = 0.6 * normalised_themes + 0.4 * normalised_embeddings
+        combined = np.where(np.isfinite(combined), combined, -np.inf)
+        return CrossDomainScores(
+            theme_profiles=profiles,
+            theme_scores=theme_scores,
+            embedding_scores=embedding_scores,
+            combined_scores=combined,
+        )
+
+    def shared_themes(self, source_ids: int | list[int], target_id: int) -> list[str]:
+        """Return the highest-contributing shared themes, matching CLI evidence."""
+        ids = [source_ids] if isinstance(source_ids, int) else source_ids
+        source: dict[str, float] = {}
+        for source_id in ids:
+            for theme, weight in self.source_vectors.get(int(source_id), {}).items():
+                source[theme] = source.get(theme, 0.0) + weight
+        target = self.target_vectors.get(int(target_id), {})
+        total = sum(source.values())
+        profile = {theme: weight / total for theme, weight in source.items()} if total else {}
+        shared = [theme for theme in target if theme in profile]
+        shared.sort(
+            key=lambda theme: -(
+                profile[theme]
+                * target[theme]
+                * self.theme_idf[self.theme_positions[theme]]
+            )
+        )
+        return shared[:5]
 
 
 def _titles(data: pd.DataFrame, key: str) -> dict[int, str]:
@@ -68,7 +208,7 @@ def resolve_items(data: pd.DataFrame, liked_items: list[str], key: str) -> dict[
             score_cutoff=60.0,
         )
         if matches:
-            raw, _score, _title = int(matches[0][2]), float(matches[0][1]), matches[0][0]
+            raw = int(matches[0][2])
             resolved[raw] = titles[raw]
             logger.info("fuzzy-resolved %r -> %r", wanted, titles[raw])
     return resolved
@@ -94,63 +234,12 @@ def recommend_cross_domain(
         return []
     logger.info("resolved: %s", resolved)
 
-    # --- theme profile -------------------------------------------------------
-    item_vectors = item_theme_vectors(source)
-    theme_profile: dict[str, float] = {}
-    for raw in resolved:
-        for theme, weight in item_vectors.get(int(raw), {}).items():
-            theme_profile[theme] = theme_profile.get(theme, 0.0) + float(weight)
-    if theme_profile:
-        total = sum(theme_profile.values())
-        theme_profile = {t: w / total for t, w in theme_profile.items()}
-
-    # --- target-side theme vectors + embedding means --------------------------
-    target_vectors = item_theme_vectors(target)
+    scorer = CrossDomainScorer(source, target)
+    scores = scorer.score_sources(list(resolved))
     target_titles = _titles(target.items, DOMAINS[target_domain]["item_key"])
-
-    # TF-IDF style down-weighting: themes that appear in a large share of the
-    # target catalogue ("classic", "strange", ...) carry little information,
-    # otherwise every profile degenerates into them.
-    n_themed = max(1, sum(1 for v in target_vectors.values() if v))
-    df: dict[str, int] = {}
-    for vector in target_vectors.values():
-        for theme in vector:
-            df[theme] = df.get(theme, 0) + 1
-    idf = {t: float(np.log(n_themed / d)) for t, d in df.items()}
-
-    theme_scores = np.zeros(len(target.catalog), dtype=np.float64)
-    shared: dict[int, list[str]] = {}
-    for pos, raw in enumerate(target.catalog):
-        vector = target_vectors.get(int(raw))
-        if not vector:
-            continue
-        overlap = [t for t in vector if t in theme_profile]
-        if not overlap:
-            continue
-        contrib = {
-            t: theme_profile[t] * vector[t] * idf.get(t, 0.0) for t in overlap
-        }
-        theme_scores[pos] = sum(contrib.values())
-        shared[pos] = sorted(overlap, key=lambda t: -contrib[t])[:5]
-
-    embed_scores = np.zeros(len(target.catalog), dtype=np.float64)
-    if source.embeddings is not None and target.embeddings is not None:
-        source_positions = [
-            source.item_pos(raw) for raw in resolved if source.item_pos(raw) is not None
-        ]
-        if source_positions:
-            profile = source.embeddings[source_positions].mean(axis=0)
-            norm = np.linalg.norm(profile)
-            if norm > 0:
-                emb = target.embeddings
-                embed_scores = emb @ (profile / norm)
-
-    def _norm(v: np.ndarray) -> np.ndarray:
-        hi = v.max()
-        return v / hi if hi > 0 else v
-
-    combined = 0.6 * _norm(theme_scores) + 0.4 * _norm(embed_scores)
-    combined = np.where(np.isfinite(combined), combined, -np.inf)
+    theme_scores = scores.theme_scores[0]
+    embed_scores = scores.embedding_scores[0]
+    combined = scores.combined_scores[0]
 
     results: list[CrossDomainResult] = []
     k = min(top_k, int((combined > 0).sum()))
@@ -166,7 +255,7 @@ def recommend_cross_domain(
                 score=float(combined[pos]),
                 theme_score=float(theme_scores[pos]),
                 embedding_score=float(embed_scores[pos]),
-                shared_themes=shared.get(int(pos), []),
+                shared_themes=scorer.shared_themes(list(resolved), int(raw)),
             )
         )
     return results
@@ -219,4 +308,12 @@ def run(cfg: Config, args: argparse.Namespace | None = None) -> int:
     return 0
 
 
-__all__ = ["CrossDomainResult", "recommend_cross_domain", "resolve_items", "run", "write_persona_report"]
+__all__ = [
+    "CrossDomainResult",
+    "CrossDomainScores",
+    "CrossDomainScorer",
+    "recommend_cross_domain",
+    "resolve_items",
+    "run",
+    "write_persona_report",
+]
