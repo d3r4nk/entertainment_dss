@@ -1,0 +1,46 @@
+movie_id,game_app_id,movie_title,game_title,relation_type,confidence,note,reviewed
+1214,214490,Alien,Alien: Isolation,franchise,0.99,Same Alien franchise; the game is explicitly set in that universe.,false
+3702,234140,Mad Max,Mad Max,franchise,0.99,Same franchise and shared title.,false
+260,6030,Star Wars: Episode IV - A New Hope,STAR WARS™ Jedi Knight II - Jedi Outcast™,franchise,0.97,Same Star Wars universe and licensed franchise.,false
+1196,32440,Star Wars: Episode V - The Empire Strikes Back,LEGO® Star Wars™ - The Complete Saga,franchise,0.98,The game adapts multiple original-trilogy story episodes.,false
+4993,212500,"Lord of the Rings: The Fellowship of the Ring, The",The Lord of the Rings Online™,franchise,0.97,Same Tolkien Middle-earth setting and franchise.,false
+5952,241930,"Lord of the Rings: The Two Towers, The",Middle-earth™: Shadow of Mordor™,franchise,0.97,Same Tolkien Middle-earth setting and franchise.,false
+33794,35140,Batman Begins,Batman: Arkham Asylum Game of the Year Edition,franchise,0.96,Shared Batman character and DC setting; different stories.,false
+91529,208650,"Dark Knight Rises, The",Batman™: Arkham Knight,franchise,0.96,Shared Batman character and DC setting; different stories.,false
+8861,21690,Resident Evil: Apocalypse,Resident Evil 5,franchise,0.98,Same Resident Evil franchise and survival-horror universe.,false
+45081,19000,Silent Hill,Silent Hill Homecoming,franchise,0.99,Same Silent Hill franchise and horror setting.,false
+589,954740,Terminator 2: Judgment Day,Terminator: Resistance,franchise,0.97,Same Terminator franchise and war-against-machines setting.,false
+5349,1817070,Spider-Man,Marvel’s Spider-Man Remastered,franchise,0.98,Same Spider-Man character and Marvel franchise.,false
+4896,21130,Harry Potter and the Sorcerer's Stone (a.k.a. Harry Potter and the Philosopher's Stone),LEGO® Harry Potter: Years 1-4,franchise,0.98,The game adapts the first four Harry Potter books and films.,false
+480,1244460,Jurassic Park,Jurassic World Evolution 2,franchise,0.97,Same Jurassic Park/World franchise and dinosaur setting.,false
+44,976310,Mortal Kombat,Mortal Kombat 11,franchise,0.98,Same Mortal Kombat fighting-game franchise.,false
+393,310950,Street Fighter,Street Fighter V,franchise,0.98,Same Street Fighter fighting-game franchise.,false
+37380,379720,Doom,DOOM,adaptation,0.91,The 2005 film adapts the DOOM video-game franchise.,false
+68358,9900,Star Trek,Star Trek Online,franchise,0.98,Same Star Trek science-fiction franchise.,false
+184471,203160,Tomb Raider,Tomb Raider,adaptation,0.95,The 2018 film and 2013 game are separate reboots of the same character and series.,false
+541,1091500,Blade Runner,Cyberpunk 2077,thematic,0.90,"Cyberpunk worlds centered on corporate power, technology, and human identity.",false
+2571,238010,"Matrix, The","Deus Ex: Human Revolution - Director's Cut",thematic,0.88,"Simulated reality, cybernetics, and human agency are central to both.",false
+2288,17470,"Thing, The",Dead Space (2008),thematic,0.89,"Isolated crews confront hostile alien organisms and body-horror threats.",false
+1387,939850,Jaws,The Dark Pictures Anthology: Man of Medan,thematic,0.83,"Both use maritime isolation and a predatory threat to drive suspense.",false
+7143,814380,"Last Samurai, The",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,0.88,"Both foreground samurai combat and Japanese historical settings.",false
+3578,214950,Gladiator,Total War: ROME II - Emperor Edition,thematic,0.86,"Both draw on ancient Rome, its military conflicts, and imperial politics.",false
+2028,231430,Saving Private Ryan,Company of Heroes 2,thematic,0.90,"Both depict World War II combat and allied military operations.",false
+1201,1174180,"Good, the Bad and the Ugly, The (Buono, il brutto, il cattivo, Il)",Red Dead Redemption 2,thematic,0.90,"Both are frontier Westerns featuring outlaws, violence, and morally gray characters.",false
+1208,50300,Apocalypse Now,Spec Ops: The Line,thematic,0.90,"Both examine psychological breakdown and moral injury in war.",false
+79132,870780,Inception,Control Ultimate Edition,thematic,0.86,"Both feature unstable realities, altered perception, and psychological mystery.",false
+81591,108710,Black Swan,Alan Wake,thematic,0.80,"Both use psychological suspense and uncertainty around a protagonist's perception.",false
+74458,57300,Shutter Island,Amnesia: The Dark Descent,thematic,0.86,"Both use unreliable perception, memory, and psychological horror.",false
+7361,282140,Eternal Sunshine of the Spotless Mind,SOMA,thematic,0.89,"Both explore memory, identity, and the self through speculative science.",false
+48774,282070,Children of Men,This War of Mine,thematic,0.85,"Both portray civilian survival and human cost amid societal collapse and conflict.",false
+32,10130,Twelve Monkeys (a.k.a. 12 Monkeys),TimeShift™,thematic,0.83,"Both use time travel to confront altered timelines and catastrophic futures.",false
+115713,1222140,Ex Machina,Detroit: Become Human,thematic,0.92,"Both focus on artificial intelligence, personhood, and moral agency.",false
+47,110800,Seven (a.k.a. Se7en),L.A. Noire,thematic,0.87,"Both center on methodical investigation of serious crimes in a noir register.",false
+1258,739630,"Shining, The",Phasmophobia,thematic,0.82,"Both use haunted locations, supernatural threat, and psychological horror.",false
+1265,874260,Groundhog Day,The Forgotten City,thematic,0.89,"Both make a repeating day/time loop central to the story.",false
+924,753640,2001: A Space Odyssey,Outer Wilds,thematic,0.89,"Both use space exploration to examine discovery, cosmic scale, and existential questions.",false
+1527,1328670,"Fifth Element, The",Mass Effect™ Legendary Edition,thematic,0.83,"Both are colorful space operas with interstellar threats and ensemble adventure.",false
+3000,587620,Princess Mononoke (Mononoke-hime),Okami HD,thematic,0.91,"Both draw on Japanese folklore and conflicts between people and the natural/spirit world.",false
+3996,814380,"Crouching Tiger, Hidden Dragon (Wo hu cang long)",Sekiro™: Shadows Die Twice - GOTY Edition,thematic,0.88,"Both feature stylized martial arts and historical-fantasy East Asian settings.",false
+1682,1703340,"Truman Show, The",The Stanley Parable: Ultra Deluxe,thematic,0.86,"Both question constructed realities, authored narratives, and personal agency.",false
+116797,653530,The Imitation Game,Return of the Obra Dinn,thematic,0.82,"Both reward reconstructing a mystery from sparse clues in a historical setting.",false
+1997,238320,"Exorcist, The",Outlast,thematic,0.86,"Both use religious institutions, demonic threat, and survival horror.",false
