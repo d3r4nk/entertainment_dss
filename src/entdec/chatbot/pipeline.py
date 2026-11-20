@@ -1030,8 +1030,22 @@ class ChatPipeline:
                 items = [candidate]
                 domains = [domain]
         else:
+            title_exclusions = list(intent.exclude)
+            if session is not None:
+                attribute_exclusions = {
+                    _normalise_reference_text(constraint.split(":", maxsplit=1)[1])
+                    for constraint in session.recent_constraints
+                    if constraint.startswith("avoid:")
+                }
+                if "violence" in attribute_exclusions:
+                    attribute_exclusions.update({"violent", "gore", "blood"})
+                title_exclusions = [
+                    term
+                    for term in title_exclusions
+                    if _normalise_reference_text(term) not in attribute_exclusions
+                ]
             stateless_excluded_ids = (
-                self._excluded_ids(intent.exclude, domains)
+                self._excluded_ids(title_exclusions, domains)
                 if session is None
                 else set()
             )
@@ -1051,7 +1065,7 @@ class ChatPipeline:
                     )
                 ) if session else set()
                 excluded_ids = (
-                    self._excluded_ids(intent.exclude, [domain])
+                    self._excluded_ids(title_exclusions, [domain])
                     if session is not None
                     else stateless_excluded_ids
                 ) | session_exclusions

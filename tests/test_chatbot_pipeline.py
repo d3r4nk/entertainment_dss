@@ -359,12 +359,28 @@ def test_violence_constraint_is_not_fuzzy_resolved_as_a_title(
     catalogue_cfg: Config, monkeypatch
 ) -> None:
     monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
-    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(_EchoHandler()))
+    class _ViolenceHandler(_EchoHandler):
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/generate":
+                request.read()
+                return httpx.Response(
+                    200,
+                    json={"response": json.dumps({**INTENT_JSON, "exclude": ["violence"]})},
+                )
+            return super().__call__(request)
+
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(_ViolenceHandler()))
     session = ChatSession()
     session.recent_domain = "movie"
-    result = pipeline.run("less violence", session=session)
+    exclusions: list[list[str]] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_excluded_ids",
+        lambda titles, _domains: exclusions.append(titles) or set(),
+    )
+    pipeline.run("less violence", session=session)
 
-    assert "violence" not in result.intent.exclude
+    assert exclusions and all("violence" not in terms for terms in exclusions)
     assert "avoid:violence" in session.recent_constraints
 
 
