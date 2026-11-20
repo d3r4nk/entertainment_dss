@@ -17,6 +17,7 @@ Entertainment_decision/
 ├── PROGRESS.md
 ├── config\                         # Configuration: hand-edited settings and generated weights
 │   ├── settings.yaml               # Human-maintained profiles and application settings
+│   ├── chat_eval_conversations.yaml # Twenty scripted three-turn memory evaluations
 │   ├── tuned_weights.yaml          # Generated validation-tuned recommender and chat weights
 │   └── cross_domain_gold_pairs.csv # Curated, unreviewed cross-domain evaluation pairs
 ├── src\                            # Application source
@@ -73,7 +74,9 @@ Entertainment_decision/
 │       ├── chatbot\                 # Chat CLI and grounded recommendation pipeline
 │       │   ├── __init__.py          # Chatbot package marker
 │       │   ├── cli.py               # run - interactive chat and one-question command-line entry point
-│       │   └── pipeline.py          # ChatPipeline, ChatRanker - retrieval, evidence, reranking, grounded answers
+│       │   ├── eval.py              # evaluate, run - live multi-turn memory evaluation
+│       │   ├── pipeline.py          # ChatPipeline, ChatRanker - retrieval, evidence, reranking, grounded answers
+│       │   └── session.py           # ChatSession, ChatTurn - bounded code-built conversation state
 │       ├── llm\                     # Intent parsing, grounded answer generation, and prompts
 │       │   ├── __init__.py          # LLM package marker
 │       │   ├── generator.py         # parse_answer, generate_answer, fallback_answer - grounded responses
@@ -89,8 +92,11 @@ Entertainment_decision/
 │   ├── conftest.py                  # Shared synthetic datasets, config, and filesystem fixtures
 │   ├── test_api_main.py             # Unit: FastAPI health, recommend, chat, validation, and degraded states
 │   ├── test_chatbot_integration.py  # Integration: chatbot sample queries against live services
+│   ├── test_chatbot_memory_integration.py  # Integration: multi-turn memory and grounding
+│   ├── test_chatbot_eval.py         # Unit: 20 scripted three-turn evaluation conversations
 │   ├── test_chatbot_intent.py       # Unit: intent parsing, language, fallback, and grounded explanations
 │   ├── test_chatbot_pipeline.py     # Unit: candidate retrieval, chat weights, evidence, reranking, and grounding
+│   ├── test_chatbot_session.py      # Unit: positional references, feedback, and bounded memory
 │   ├── test_cli_parser.py           # Unit: global and subcommand profile argument parsing
 │   ├── test_config.py               # Unit: profiles, environment overrides, paths, and persisted weights
 │   ├── test_data_enrich.py          # Unit: co-occurrence similarity and tag propagation
@@ -352,6 +358,8 @@ rebuilds the selected step's outputs. `--profile tiny` (500 items + 1 000 users 
 .venv/Scripts/python.exe -m entdec recsys    --profile tiny     # fit/tune/evaluate/report all models (+ action, --models, --limit-users)
 .venv/Scripts/python.exe -m entdec cross     --profile tiny     # cross-domain personas -> reports/tiny/cross_domain_examples.md
 .venv/Scripts/python.exe -m entdec chat      --profile tiny     # interactive chatbot (Ctrl+C/exit to leave; --question Q for one turn)
+.venv/Scripts/python.exe -m entdec chat      --profile tiny --no-memory # disable conversation memory
+.venv/Scripts/python.exe -m entdec chateval  --profile tiny     # live 20-conversation memory evaluation
 .venv/Scripts/python.exe -m entdec chat      --profile tiny --no-graph # local Parquet retrieval only
 .venv/Scripts/python.exe -m entdec api       --profile tiny     # FastAPI on 127.0.0.1:8000: /health, /chat, /recommend
 .venv/Scripts/python.exe -m entdec ui        --profile tiny     # Streamlit chat UI on port 8501
@@ -448,6 +456,7 @@ service.
 .\.venv\Scripts\python.exe -m entdec cross --profile tiny [--top-k N]
 .\.venv\Scripts\python.exe -m entdec crosseval --profile default [--seeds N] [--k 10] [--gold-only] [--no-title-mask-check]
 .\.venv\Scripts\python.exe -m entdec crosseval --profile tiny [--seeds N] [--k 10] [--gold-only] [--no-title-mask-check]
+.\.venv\Scripts\python.exe -m entdec chateval --profile tiny # 20 scripted three-turn conversations; report in reports/tiny/
 .\.venv\Scripts\python.exe -m entdec all --profile tiny [--skip-llm] [--force] [--no-graph]
 ```
 
@@ -496,6 +505,8 @@ Remove-Item Env:ENTDEC_NO_GRAPH
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/recommend" -Method Post -ContentType "application/json" -Body (@{ query = "space adventure"; domain = "movie"; k = 3 } | ConvertTo-Json)
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/chat" -Method Post -ContentType "application/json" -Body (@{ message = "Suggest a story-rich game like Inception"; language = "en" } | ConvertTo-Json)
+# Reuse the returned session_id on the next /chat request; clear it with:
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/session/<session_id>" -Method Delete
 
 # Streamlit UI (default port 8501):
 .\.venv\Scripts\python.exe -m entdec ui --profile tiny --port 8501
@@ -503,6 +514,31 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/chat" -Method Post -ContentType "a
 
 Stop the foreground API or UI with **Ctrl+C**. Restart it by running the same
 command again. `chat`, `api`, and `ui` also accept `--no-graph`.
+
+### Conversation memory
+
+CLI interactive chats, API clients that reuse `session_id`, and the Streamlit
+page keep a bounded conversation session. The default retains the last four
+turns and code-built facts: parsed intent, resolved catalogue references,
+items already shown, explicit likes/dislikes, and recent domain/theme/genre
+constraints. Position phrases such as “cái thứ hai” and “the second one” refer
+to the most recently displayed list. Clear topic changes drop carried filters;
+repeat requests may show prior recommendations again.
+
+Memory is assembled only from the new user message and verified catalogue
+results/references. Previous assistant answers are kept only for CLI/UI history
+display and are never fed back to the intent parser. It is not persistent
+personalization: CLI and Streamlit state lives for that process/page session;
+API state is in memory only, expires after 60 minutes by default, and is capped
+at 100 sessions. Nothing is written to a database or retained after the process
+ends. Avoid putting sensitive information in chat messages.
+
+Use `/reset` to clear the active CLI conversation and `/history` to display its
+bounded transcript. Streamlit has a **Cuộc trò chuyện mới** button. API
+`POST /chat` accepts an optional `session_id` and returns the session ID to
+reuse; `DELETE /session/{id}` removes it. Set `ENTDEC_MEMORY_ENABLED=false` or
+pass `chat --no-memory` to disable memory. Defaults live under `llm` in
+`config/settings.yaml`.
 
 ### Quality checks
 
@@ -514,6 +550,8 @@ command again. `chat`, `api`, and `ui` also accept `--no-graph`.
 
 The integration tests need the tiny Neo4j graph (and the chatbot integration
 tests also need Ollama); the unit suite does not require those live services.
+Run `python -m entdec chateval --profile tiny` for the live scripted memory
+evaluation; the latest results are in [reports/tiny/chat_memory_eval.md](reports/tiny/chat_memory_eval.md).
 
 ### Typical workflows
 
