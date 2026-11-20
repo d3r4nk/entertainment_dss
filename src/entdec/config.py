@@ -46,6 +46,7 @@ class EnvSettings(BaseSettings):
     neo4j_password: str = "entdecdevpass"
     neo4j_database: str = "neo4j"
     entdec_no_graph: bool = False
+    entdec_memory_enabled: bool | None = None
 
     # Ollama
     ollama_host: str = "http://localhost:11434"
@@ -168,6 +169,12 @@ class Config:
     @property
     def top_k_report(self) -> list[int]:
         return [int(k) for k in self.get("recsys.top_k_report", [10, 20])]
+
+    @property
+    def memory_enabled(self) -> bool:
+        """Conversational memory setting, with an environment override."""
+        override = self.env.entdec_memory_enabled
+        return bool(self.get("llm.memory_enabled", True)) if override is None else override
 
     def path(self, *parts: str) -> Path:
         """Resolve a path below the project root."""

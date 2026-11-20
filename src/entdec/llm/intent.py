@@ -156,6 +156,7 @@ def parse_intent(
     client: OllamaClient,
     question: str,
     *,
+    context: str | None = None,
     intent_temperature: float = 0.0,
     num_ctx: int = 4096,
     system_prompt: str | None = None,
@@ -169,10 +170,15 @@ def parse_intent(
     from entdec.llm.prompts import INTENT_RETRY_HINT, INTENT_SYSTEM
 
     system = system_prompt or INTENT_SYSTEM
+    parser_input = (
+        f"{context.strip()}\n\nNew message: {question.strip()}"
+        if context and context.strip()
+        else question
+    )
     previous = ""
     for attempt in (1, 2):
-        prompt = question if attempt == 1 else (
-            INTENT_RETRY_HINT.format(previous=previous[:400]) + "\n\nUser request: " + question
+        prompt = parser_input if attempt == 1 else (
+            INTENT_RETRY_HINT.format(previous=previous[:400]) + "\n\nUser request: " + parser_input
         )
         try:
             result = client.generate(

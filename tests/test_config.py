@@ -63,6 +63,15 @@ def test_env_can_disable_neo4j(monkeypatch: pytest.MonkeyPatch) -> None:
     assert EnvSettings().entdec_no_graph is True
 
 
+def test_memory_settings_and_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_config("tiny")
+    assert cfg.get("llm.memory_turns") == 4
+    assert cfg.get("llm.session_ttl_minutes") == 60
+    assert cfg.memory_enabled is True
+    monkeypatch.setenv("ENTDEC_MEMORY_ENABLED", "false")
+    assert load_config("tiny").memory_enabled is False
+
+
 def test_path_overrides_from_env(tmp_path: Path) -> None:
     env = EnvSettings(entdec_data_dir=tmp_path / "d", entdec_cache_dir=tmp_path / "c")
     paths = build_paths(env)

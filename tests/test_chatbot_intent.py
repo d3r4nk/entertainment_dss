@@ -99,6 +99,26 @@ def test_parse_intent_valid_json() -> None:
     assert "Inception" in result.reference_titles
 
 
+def test_parse_intent_receives_code_context_and_current_message_only() -> None:
+    prompts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read())
+        prompts.append(body["prompt"])
+        return httpx.Response(200, json={"response": json.dumps(GOOD_INTENT)})
+
+    result = parse_intent(
+        make_client(handler),
+        "more games",
+        context="Verified conversation context: domain=game; themes=story rich",
+    )
+
+    assert result.domain == "game"
+    assert prompts == [
+        "Verified conversation context: domain=game; themes=story rich\n\nNew message: more games"
+    ]
+
+
 def test_parse_intent_retries_once_then_succeeds() -> None:
     calls = {"n": 0}
 

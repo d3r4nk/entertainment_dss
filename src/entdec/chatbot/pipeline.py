@@ -26,12 +26,14 @@ per turn and reused by both domains.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
+from entdec.chatbot.session import ChatSession
 from entdec.config import Config
 from entdec.llm.generator import generate_answer
 from entdec.llm.intent import (
@@ -39,6 +41,7 @@ from entdec.llm.intent import (
     canonical_genres,
     normalize_theme_names,
     parse_intent,
+    rules_intent,
 )
 from entdec.logging_setup import get_logger
 from entdec.nlp.ollama_client import OllamaClient, l2_normalize
@@ -86,6 +89,69 @@ NO_RESULT_MESSAGE = {
     "en": "No matching item was found in the current catalogue - please try rephrasing.",
 }
 
+_FOLLOW_UP_RE = re.compile(
+    r"\b(?:more|another|additional|again|lighter|violence|violent|it|that|one|"
+    r"thêm|nữa|nó|đó|cái|nhẹ nhàng|bạo lực)\b",
+    re.I,
+)
+_REFERENCE_QUESTION_RE = re.compile(
+    r"(?:là gì|là ai|mô tả|nói về|what is|what's|describe|tell me about|which one)",
+    re.I,
+)
+_REFERENCE_CUE_RE = re.compile(
+    r"\b(?:like|similar to|love|loved|liked|likes|fans of|enjoy|enjoyed|"
+    r"inspired by|already played|already seen|played|seen|don't like|do not like|"
+    r"thích|giống|hay chơi|cho người thích|đã xem|đã chơi)\b",
+    re.I,
+)
+
+
+def _is_short_follow_up(question: str) -> bool:
+    return len(question.split()) <= 12 and bool(_FOLLOW_UP_RE.search(question))
+
+
+def _has_constraint_change(question: str) -> bool:
+    return bool(re.search(r"(?:less|more|không|ít|nhiều|tránh|avoid|without)", question, re.I))
+
+
+def _is_lighter_request(question: str) -> bool:
+    return bool(re.search(
+        r"(?:ít bạo lực hơn|nhẹ nhàng hơn|something lighter|lighter|less violent|less violence)",
+        question,
+        re.I,
+    ))
+
+
+def _is_less_violent_request(question: str) -> bool:
+    return bool(re.search(r"(?:ít bạo lực hơn|less violent|less violence)", question, re.I))
+
+
+def _matches_constraint_exclusion(
+    candidate: Candidate, ranker: ChatRanker, terms: list[str]
+) -> bool:
+    if not terms:
+        return False
+    labels = list(ranker.theme_vectors.get(candidate.item_id, {}))
+    labels.extend(
+        str(row.genre)
+        for row in ranker.data.genres.itertuples(index=False)
+        if int(row.item_id) == candidate.item_id
+    )
+    return any(
+        term in label.casefold()
+        or (term == "violence" and ("violent" in label.casefold() or "gore" in label.casefold()))
+        for term in terms
+        for label in labels
+    )
+
+
+def _asks_about_reference(question: str) -> bool:
+    return bool(_REFERENCE_QUESTION_RE.search(question))
+
+
+def _asks_repeat(question: str) -> bool:
+    return bool(re.search(r"(?:lặp lại|nói lại|repeat|again|show again)", question, re.I))
+
 
 # --------------------------------------------------------------------------- #
 # result types
@@ -97,6 +163,7 @@ class Candidate:
     item_id: int
     title: str
     position: int  # row in the DomainData catalog
+    domain: str = ""
     scores: dict[str, float] = field(default_factory=dict)
     shared_themes: list[str] = field(default_factory=list)
     shared_genres: list[str] = field(default_factory=list)
@@ -189,11 +256,11 @@ def fuzzy_resolve(wanted: list[str], titles: dict[str, Any]) -> dict[str, Any]:
     for want in wanted:
         matches = process.extract(normalise_title(want), choices, limit=1, score_cutoff=70.0)
         if not matches:
-            logger.info("unresolved reference title %r", want)
+            logger.info("unresolved catalogue reference")
             continue
         match_title = normalised[str(matches[0][0])]
         resolved[match_title] = titles[match_title]
-        logger.info("resolved %r -> %r (value %r)", want, match_title, titles[match_title])
+        logger.info("resolved catalogue reference")
     return resolved
 
 
@@ -203,6 +270,10 @@ def normalise_title(title: str) -> str:
     for symbol in ("®", "™", "©"):
         cleaned = cleaned.replace(symbol, "")
     return " ".join(cleaned.split())
+
+
+def _normalise_reference_text(text: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", text.casefold()).split())
 
 
 def node_id_of(domain: str, raw: int) -> str:
@@ -475,6 +546,7 @@ def initialise_candidates(pool: dict[int, Candidate], ranker: ChatRanker, raw: i
             item_id=int(raw),
             title=titles.get(int(raw), str(raw)),
             position=int(ranker.data.item_pos(int(raw))),
+            domain=ranker.domain,
         )
         pool[int(raw)] = candidate
     for key, score in scores.items():
@@ -604,6 +676,10 @@ class ChatPipeline:
         """
         if not wanted:
             return {}
+        return fuzzy_resolve(wanted, self.title_catalog())
+
+    def title_catalog(self) -> dict[str, tuple[str, int]]:
+        """Return verified title-to-domain/id mappings from the active backends."""
         pool: dict[str, tuple[str, int]] = {}
         if self._graph_ok is not False:
             try:
@@ -618,7 +694,27 @@ class ChatPipeline:
                         pool.setdefault(title, (domain, raw))
                 except Exception as exc:  # noqa: BLE001 - one domain may be absent
                     logger.info("local titles unavailable for %s (%s)", domain, exc)
-        return fuzzy_resolve(wanted, pool)
+        return pool
+
+    def resolve_message_references(self, message: str) -> dict[str, tuple[str, int]]:
+        """Resolve literal catalogue-title mentions before intent parsing."""
+        normalized_message = _normalise_reference_text(message)
+        padded_message = f" {normalized_message} "
+        found: dict[str, tuple[str, int]] = {}
+        for title, reference in self.title_catalog().items():
+            clean_title = normalise_title(title)
+            aliases = {clean_title}
+            aliases.add(re.sub(r"\s*\([^)]*\)", "", clean_title).strip())
+            tokens = aliases.copy()
+            for alias in aliases:
+                words = alias.split()
+                tokens.update(" ".join(words[:size]) for size in range(2, len(words)))
+            for alias in tokens:
+                normalized_alias = _normalise_reference_text(alias)
+                if len(normalized_alias) >= 4 and f" {normalized_alias} " in padded_message:
+                    found[title] = reference
+                    break
+        return found
 
     def retrieve(
         self,
@@ -794,7 +890,12 @@ class ChatPipeline:
         return weights
 
     def run(
-        self, question: str, *, language: str | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        language: str | None = None,
+        top_k: int | None = None,
+        session: ChatSession | None = None,
     ) -> ChatResult:
         """Full pipeline for one question; embedding and generation are sequential."""
         started = time.perf_counter()
@@ -805,50 +906,179 @@ class ChatPipeline:
         query_vector = self.question_embedding(question)
         durations["embed_s"] = time.perf_counter() - t0
 
-        # 2. intent (generation engine already warm)
+        # 2. Resolve references from prior displayed evidence before parsing.
+        session_references: dict[str, tuple[str, int]] = {}
+        feedback_constraints: list[str] = []
+        follow_up = False
+        explicit_domain = None
+        if session is not None:
+            rules = rules_intent(question)
+            follow_up = _is_short_follow_up(question)
+            domain_changed = (
+                session.recent_domain
+                and rules.domain in {"movie", "game"}
+                and rules.domain != session.recent_domain
+            )
+            explicit_filters_changed = (
+                not follow_up
+                and bool(rules.genres or rules.themes)
+                and bool(set(rules.genres + rules.themes) - set(session.recent_genres + session.recent_themes))
+            )
+            if domain_changed or explicit_filters_changed:
+                session.clear_recent_context()
+            session_references = session.resolve_position(question)
+            session_references.update(session.titles_in_history(question))
+            if _REFERENCE_CUE_RE.search(question):
+                session_references.update(self.resolve_message_references(question))
+            _liked, _excluded, feedback_constraints = session.feedback_for(
+                question, session_references
+            )
+            session.recent_constraints = list(dict.fromkeys(
+                [*session.recent_constraints, *feedback_constraints]
+            ))[-8:]
+            explicit_domain = rules.domain if rules.domain in {"movie", "game"} else None
+
+        # 3. intent (the parser gets the new message and a code-built summary only)
         t0 = time.perf_counter()
         intent = parse_intent(
             self.client,
             question,
+            context=session.summary_for_intent() if session is not None else None,
             intent_temperature=float(self.cfg.get("llm.intent_temperature", 0.0)),
             num_ctx=int(self.cfg.get("llm.num_ctx", 4096)),
         )
         durations["intent_s"] = time.perf_counter() - t0
         language = (language or intent.language or "vi").lower()[:2]
+        if session is not None:
+            if session_references and _asks_about_reference(question):
+                intent.reference_titles = list(session_references)
+            else:
+                intent.reference_titles = list(dict.fromkeys(
+                    [*intent.reference_titles, *session_references]
+                ))
+            if follow_up and (
+                not explicit_domain or explicit_domain == session.recent_domain
+            ):
+                if not explicit_domain and session.recent_domain and intent.domain == "both":
+                    intent.domain = session.recent_domain
+                if not intent.genres:
+                    intent.genres = list(session.recent_genres)
+                if not intent.themes:
+                    intent.themes = list(session.recent_themes)
+            if follow_up and session.recent_constraints and not _has_constraint_change(question):
+                for constraint in session.recent_constraints:
+                    if constraint.startswith("avoid:"):
+                        intent.exclude = list(dict.fromkeys(
+                            [*intent.exclude, constraint.split(":", maxsplit=1)[1]]
+                        ))
+                    else:
+                        intent.themes = list(dict.fromkeys([*intent.themes, constraint]))
+            if _is_lighter_request(question) and not _is_less_violent_request(question):
+                intent.themes = list(dict.fromkeys([*intent.themes, "cosy"]))
+            for constraint in feedback_constraints:
+                if constraint.startswith("avoid:"):
+                    intent.exclude = list(dict.fromkeys(
+                        [*intent.exclude, constraint.split(":", maxsplit=1)[1]]
+                    ))
+                else:
+                    intent.themes = list(dict.fromkeys([*intent.themes, constraint]))
+            if explicit_domain:
+                intent.domain = explicit_domain
+            if explicit_domain and session_references and _asks_about_reference(question):
+                selected_domain = next(iter(session_references.values()))[0]
+                intent.domain = selected_domain
         domains = [intent.domain] if intent.domain in {"movie", "game"} else ["movie", "game"]
 
-        # 3. retrieval (graph, or parquet when Neo4j is down)
+        # 4. retrieval (graph, or parquet when Neo4j is down)
         t0 = time.perf_counter()
         references = self.resolve_references(intent.reference_titles)
+        references.update(session_references)
+        if session is not None and follow_up:
+            references = {**session.liked_references, **references}
+            intent.reference_titles = list(dict.fromkeys(
+                [*intent.reference_titles, *session.liked_references]
+            ))
         pools, used_graph = self.retrieve(domains, intent, question, query_vector, references)
+        if session is not None:
+            constraint_exclusions = [
+                constraint.split(":", maxsplit=1)[1]
+                for constraint in session.recent_constraints
+                if constraint.startswith("avoid:")
+            ]
+            for domain, pool in pools.items():
+                ranker = self._ranker(domain)
+                pools[domain] = {
+                    item_id: candidate
+                    for item_id, candidate in pool.items()
+                    if not _matches_constraint_exclusion(
+                        candidate, ranker, constraint_exclusions
+                    )
+                }
         durations["retrieval_s"] = time.perf_counter() - t0
 
-        # 4. rerank
+        # 5. rerank
         t0 = time.perf_counter()
         items: list[Candidate] = []
-        excluded_ids = self._excluded_ids(intent.exclude, domains)
-        for domain in domains:
-            pool = pools.get(domain, {})
+        direct_reference = None
+        if session is not None and _asks_about_reference(question) and session_references:
+            direct_reference = next(iter(session_references.items()))
+        if direct_reference is not None:
+            title, (domain, raw_id) = direct_reference
             ranker = self._ranker(domain)
-            same_refs, cross_refs = self._split_references(references, domain)
-            if cross_refs:
-                add_cross_similar_evidence(pool, ranker, cross_refs, self._rankers)
-            items.extend(
-                ranker.rerank(
-                    pool,
-                    list(same_refs.values()),
-                    query_vector,
-                    extra_themes=normalize_theme_names(intent.themes, known=ranker.item_theme_names()),
-                    extra_theme_weights=self._cross_theme_weights(cross_refs),
-                    excluded_ids=excluded_ids,
-                    k=top_k or self.rerank_k,
+            position = ranker.data.item_pos(raw_id)
+            if position is not None:
+                candidate = Candidate(raw_id, title, position, domain=domain)
+                candidate.shared_themes = sorted(ranker.theme_vectors.get(raw_id, {}))
+                candidate.shared_genres = sorted(
+                    str(row.genre)
+                    for row in ranker.data.genres.itertuples(index=False)
+                    if int(row.item_id) == raw_id
                 )
+                candidate.scores["total"] = 0.0
+                items = [candidate]
+                domains = [domain]
+        else:
+            stateless_excluded_ids = (
+                self._excluded_ids(intent.exclude, domains)
+                if session is None
+                else set()
             )
+            for domain in domains:
+                pool = pools.get(domain, {})
+                ranker = self._ranker(domain)
+                same_refs, cross_refs = self._split_references(references, domain)
+                if cross_refs:
+                    add_cross_similar_evidence(pool, ranker, cross_refs, self._rankers)
+                session_likes = session.liked_ids.get(domain, set()) if session else set()
+                session_exclusions = (
+                    session.excluded_ids.get(domain, set())
+                    | (
+                        session.recommended_ids.get(domain, set())
+                        if session is not None and not _asks_repeat(question)
+                        else set()
+                    )
+                ) if session else set()
+                excluded_ids = (
+                    self._excluded_ids(intent.exclude, [domain])
+                    if session is not None
+                    else stateless_excluded_ids
+                ) | session_exclusions
+                items.extend(
+                    ranker.rerank(
+                        pool,
+                        list(dict.fromkeys([*same_refs.values(), *session_likes])),
+                        query_vector,
+                        extra_themes=normalize_theme_names(intent.themes, known=ranker.item_theme_names()),
+                        extra_theme_weights=self._cross_theme_weights(cross_refs),
+                        excluded_ids=excluded_ids,
+                        k=top_k or self.rerank_k,
+                    )
+                )
         items.sort(key=lambda c: -c.scores.get("total", 0.0))
         items = items[: top_k or self.rerank_k]
         durations["rerank_s"] = time.perf_counter() - t0
 
-        # 5. grounded explanation
+        # 6. grounded explanation
         t0 = time.perf_counter()
         evidence_lines = [candidate.evidence_line(language) for candidate in items]
         if evidence_lines:
@@ -860,7 +1090,7 @@ class ChatPipeline:
         durations["answer_s"] = time.perf_counter() - t0
         durations["total_s"] = time.perf_counter() - started
 
-        return ChatResult(
+        result = ChatResult(
             question=question,
             language=language,
             intent=intent,
@@ -873,6 +1103,16 @@ class ChatPipeline:
             resolved_references=sorted(references),
             durations=durations,
         )
+        if session is not None:
+            session.language = language
+            session.add_turn(
+                question,
+                intent,
+                references,
+                items,
+                answer,
+            )
+        return result
 
     def recommend(
         self,

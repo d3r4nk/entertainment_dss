@@ -24,16 +24,24 @@ class _StubPipeline:
         self.cfg = cfg
         self.questions: list[str] = []
 
-    def run(self, question: str, *, language: str | None = None, top_k: int | None = None) -> ChatResult:
+    def run(
+        self,
+        question: str,
+        *,
+        language: str | None = None,
+        top_k: int | None = None,
+        session=None,
+    ) -> ChatResult:
         self.questions.append(question)
         item = Candidate(
             item_id=1,
             title="Journey",
             position=0,
+            domain="game",
             scores={"total": 0.8},
             shared_themes=["exploration"],
         )
-        return ChatResult(
+        result = ChatResult(
             question=question,
             language=language or "vi",
             intent=Intent(domain="game", language=language or "vi", parsed_by="rules"),
@@ -45,6 +53,9 @@ class _StubPipeline:
             answer_llm=True,
             durations={"total_s": 0.1},
         )
+        if session is not None:
+            session.add_turn(question, result.intent, {}, result.items, result.answer)
+        return result
 
 
 def test_cli_answers_one_question(
@@ -71,6 +82,23 @@ def test_cli_empty_question_interactive_exit(
         synthetic_config, argparse.Namespace(question=None, language=None, no_graph=True)
     ) == 0
     assert "Entertainment chatbot" in capsys.readouterr().out
+
+
+def test_cli_history_and_reset_commands(
+    synthetic_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    from entdec.chatbot import pipeline as pipe_mod
+
+    monkeypatch.setattr(pipe_mod, "ChatPipeline", _StubPipeline)
+    lines = iter(["recommend a game", "/history", "/reset", "/history", "exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+    assert chat_cli.run(
+        synthetic_config, argparse.Namespace(question=None, language=None, no_graph=True)
+    ) == 0
+    output = capsys.readouterr().out
+    assert "You: recommend a game" in output
+    assert "Conversation reset." in output
+    assert "No conversation history." in output
 
 
 def test_ui_launches_streamlit_with_profile(

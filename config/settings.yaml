@@ -144,6 +144,10 @@ llm:
   retrieval_k: 30
   rerank_k: 10
   default_language: vi
+  memory_turns: 4
+  session_ttl_minutes: 60
+  max_sessions: 100
+  memory_enabled: true
 
 # --- cross-domain personas (section 7) ----------------------------------------
 cross_domain:

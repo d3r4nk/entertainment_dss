@@ -28,6 +28,7 @@ from entdec.chatbot.pipeline import (
     initialise_candidates,
     normalise_chat_weights,
 )
+from entdec.chatbot.session import ChatSession
 from entdec.config import Config
 from entdec.nlp.ollama_client import OllamaClient
 
@@ -238,6 +239,19 @@ def test_rerank_sets_shared_themes(ranker: ChatRanker) -> None:
     assert themes[101] == ["story rich", "cosy"]
 
 
+def test_liked_item_seeds_theme_ranking(ranker: ChatRanker) -> None:
+    pool: dict[int, Candidate] = {}
+    for raw in (100, 101, 102):
+        initialise_candidates(pool, ranker, raw, {})
+    query = np.zeros(DIM, dtype=np.float32)
+    ranker.rerank(pool, liked_ids=[], query_vector=query, k=3)
+    without_likes = pool[101].scores["kg"]
+
+    ranker.rerank(pool, liked_ids=[100], query_vector=query, k=3)
+
+    assert pool[101].scores["kg"] > without_likes
+
+
 # --------------------------------------------------------------------------- #
 # end to end: grounding (the mocked LLM may only mention retrieved items)
 # --------------------------------------------------------------------------- #
@@ -294,6 +308,96 @@ def test_run_grounding_no_unretrieved_items(catalogue_cfg: Config, monkeypatch) 
             assert title not in result.answer, "no unretrieved title may leak in"
     # the explicitly referenced (disliked) item must not be recommended
     assert TITLES[102] not in retrieved_titles
+
+
+def test_memory_excludes_previously_shown_items_and_resolves_follow_up(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    handler = _EchoHandler()
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(handler))
+    session = ChatSession(memory_turns=4)
+
+    first = pipeline.run("movie cosy recommendations", session=session)
+    assert first.items
+    second = pipeline.run("what is the second one?", session=session)
+    assert second.resolved_references == [first.items[1].title]
+    assert len(second.items) == 1
+    assert second.items[0].item_id == first.items[1].item_id
+    assert second.items[0].title in second.answer
+
+    third = pipeline.run("more movies please", session=session)
+    previously_shown = {item.item_id for item in [*first.items, *second.items]}
+    assert not previously_shown.intersection(item.item_id for item in third.items)
+    allowed = {item.title for item in third.items} | set(third.resolved_references)
+    assert all(
+        title not in third.answer
+        for title in set(TITLES.values()) - allowed
+    )
+
+
+def test_named_feedback_is_resolved_by_code_before_intent_parser(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    handler = _EchoHandler()
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(handler))
+    session = ChatSession()
+    monkeypatch.setattr(pipeline, "_ranker", lambda _domain: ChatRanker(catalogue_cfg, "movie"))
+    monkeypatch.setattr(
+        pipeline,
+        "retrieve",
+        lambda domains, *_args: ({domain: {} for domain in domains}, False),
+    )
+    result = pipeline.run("Tôi thích Inception, gợi ý vài game", session=session)
+
+    assert session.liked_ids["movie"] == {100}
+    assert "Inception (2010)" in result.resolved_references
+
+
+def test_stateless_pipeline_does_not_exclude_prior_turn_items(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(_EchoHandler()))
+    first = pipeline.run("movie cosy recommendations")
+    second = pipeline.run("movie cosy recommendations")
+    assert [item.item_id for item in first.items] == [item.item_id for item in second.items]
+
+
+def test_repeat_request_allows_previously_shown_items(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(_EchoHandler()))
+    session = ChatSession()
+    first = pipeline.run("movie cosy recommendations", session=session)
+    repeated = pipeline.run("show those movies again", session=session)
+    assert {item.item_id for item in first.items} <= {
+        item.item_id for item in repeated.items
+    }
+
+
+def test_topic_switch_does_not_merge_old_constraints(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    handler = _EchoHandler()
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(handler))
+    session = ChatSession()
+    session.recent_domain = "movie"
+    session.recent_themes = ["cosy"]
+    session.recent_constraints = ["cosy"]
+    monkeypatch.setattr(pipeline, "_ranker", lambda _domain: ChatRanker(catalogue_cfg, "movie"))
+    monkeypatch.setattr(pipeline, "retrieve", lambda domains, *_args: ({d: {} for d in domains}, False))
+
+    # This parser reply is movie-specific, but the code rule detects the explicit
+    # switch and must clear the old carried constraints before parsing.
+    result = pipeline.run("recommend some games", session=session)
+    assert result.intent.domain == "game"
+    assert result.intent.themes == ["cosy"]  # supplied by the mocked parser, not carried state
+    assert session.recent_constraints == ["cosy"]
+    assert "themes=cosy" not in handler.prompts[0]
 
 
 def test_run_no_candidates_returns_polite_no_answer(catalogue_cfg: Config, monkeypatch) -> None:
