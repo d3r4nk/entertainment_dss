@@ -67,6 +67,7 @@ def main() -> None:  # pragma: no cover - interactive
     no_graph = "--no-graph" in sys.argv
 
     from entdec.chatbot.pipeline import ChatPipeline
+    from entdec.chatbot.session import ChatSession
     from entdec.config import load_config
     from entdec.graph.store import GraphStoreError, ensure_graph
 
@@ -98,13 +99,24 @@ def main() -> None:  # pragma: no cover - interactive
         st.session_state.pipeline = ChatPipeline(cfg, use_graph=graph_enabled)
     if "history" not in st.session_state:
         st.session_state.history = []
+    if "chat_session" not in st.session_state and cfg.memory_enabled:
+        st.session_state.chat_session = ChatSession(
+            memory_turns=int(cfg.get("llm.memory_turns", 4))
+        )
+    if st.button("Cuộc trò chuyện mới"):
+        if "chat_session" in st.session_state:
+            st.session_state.chat_session.reset()
+        st.session_state.history = []
 
     question = st.chat_input("Your question:")
     if question:
         with st.spinner("Thinking..."):
             st.session_state.history.append(("user", question))
             try:
-                result = st.session_state.pipeline.run(question)
+                result = st.session_state.pipeline.run(
+                    question,
+                    session=st.session_state.get("chat_session"),
+                )
             except Exception as exc:  # noqa: BLE001
                 result = None
                 st.session_state.history.append(("assistant", f"(pipeline error: {exc})"))
@@ -119,6 +131,10 @@ def main() -> None:  # pragma: no cover - interactive
         else:
             with st.chat_message("assistant"):
                 st.write(payload.answer)
+                if payload.resolved_references:
+                    st.caption(
+                        "Đang nhắc đến: " + ", ".join(payload.resolved_references)
+                    )
                 if payload.items:
                     columns = st.columns(min(3, len(payload.items)))
                     for index, (column, item) in enumerate(

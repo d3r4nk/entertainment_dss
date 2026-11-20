@@ -17,10 +17,54 @@ from __future__ import annotations
 
 import argparse
 import threading
+import time
+import uuid
+from collections import OrderedDict
 
 from pydantic import BaseModel, Field
 
+from entdec.chatbot.session import ChatSession
+
 _LLM_LOCK = threading.Lock()
+
+
+class SessionStore:
+    """Bounded in-memory session store with sliding TTL."""
+
+    def __init__(self, ttl_minutes: int, max_sessions: int, memory_turns: int) -> None:
+        self.ttl_seconds = max(1, int(ttl_minutes)) * 60
+        self.max_sessions = max(1, int(max_sessions))
+        self.memory_turns = max(1, int(memory_turns))
+        self._sessions: OrderedDict[str, tuple[ChatSession, float]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, session_id: str | None = None) -> ChatSession:
+        now = time.monotonic()
+        with self._lock:
+            self._expire(now)
+            if session_id is not None and session_id in self._sessions:
+                session, _ = self._sessions.pop(session_id)
+                self._sessions[session_id] = (session, now)
+                return session
+            new_id = session_id or str(uuid.uuid4())
+            session = ChatSession(session_id=new_id, memory_turns=self.memory_turns)
+            self._sessions[new_id] = (session, now)
+            while len(self._sessions) > self.max_sessions:
+                self._sessions.popitem(last=False)
+            return session
+
+    def delete(self, session_id: str) -> bool:
+        with self._lock:
+            return self._sessions.pop(session_id, None) is not None
+
+    def _expire(self, now: float) -> None:
+        expired = [
+            key
+            for key, (_session, touched) in self._sessions.items()
+            if now - touched >= self.ttl_seconds
+        ]
+        for key in expired:
+            self._sessions.pop(key, None)
 
 
 class ChatIn(BaseModel):
@@ -28,6 +72,7 @@ class ChatIn(BaseModel):
 
     message: str
     language: str | None = Field(default=None)
+    session_id: str | None = Field(default=None)
 
 
 class RecommendIn(BaseModel):
@@ -58,6 +103,12 @@ def create_app(cfg=None, *, no_graph: bool = False):
     app = FastAPI(title="Entertainment_decision recommender", version="0.1.0")
     app.state.graph_enabled = graph_enabled
     app.state.pipeline = ChatPipeline(cfg, use_graph=graph_enabled)
+    app.state.sessions = SessionStore(
+        ttl_minutes=int(cfg.get("llm.session_ttl_minutes", 60)),
+        max_sessions=int(cfg.get("llm.max_sessions", 100)),
+        memory_turns=int(cfg.get("llm.memory_turns", 4)),
+    )
+    app.state.memory_enabled = cfg.memory_enabled
 
     @app.get("/health")
     def health() -> dict:
@@ -85,12 +136,25 @@ def create_app(cfg=None, *, no_graph: bool = False):
     def chat(body: ChatIn) -> dict:
         if not body.message.strip():
             raise HTTPException(status_code=400, detail="message must not be empty")
-        logger.info("/chat %r", body.message[:80])
+        logger.info("/chat message_chars=%d language=%s", len(body.message), body.language or "auto")
+        session = (
+            app.state.sessions.get(body.session_id)
+            if app.state.memory_enabled
+            else None
+        )
         with _LLM_LOCK:
-            result = app.state.pipeline.run(body.message, language=body.language)
+            result = app.state.pipeline.run(
+                body.message, language=body.language, session=session
+            )
         payload = result.as_dict()
         payload["answer_llm_locked"] = True
+        payload["session_id"] = session.session_id if session is not None else None
         return payload
+
+    @app.delete("/session/{session_id}")
+    def delete_session(session_id: str) -> dict:
+        deleted = app.state.sessions.delete(session_id)
+        return {"session_id": session_id, "deleted": deleted}
 
     @app.post("/recommend")
     def recommend(body: RecommendIn) -> dict:
@@ -98,7 +162,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
             raise HTTPException(status_code=400, detail="query must not be empty")
         if body.domain not in {None, "movie", "game"}:
             raise HTTPException(status_code=400, detail="domain must be movie or game")
-        logger.info("/recommend %r domain=%s", body.query[:80], body.domain)
+        logger.info("/recommend query_chars=%d domain=%s", len(body.query), body.domain)
         with _LLM_LOCK:
             result = app.state.pipeline.recommend(
                 body.query, domain=body.domain, k=body.k

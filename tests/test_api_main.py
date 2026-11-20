@@ -16,10 +16,19 @@ class _FakePipeline:
 
     def __init__(self) -> None:
         self.chat_calls: list[str] = []
+        self.sessions: list[object] = []
         self.rec_calls: list[dict[str, object]] = []
 
-    def run(self, message: str, *, language: str | None = None, top_k: int | None = None):
+    def run(
+        self,
+        message: str,
+        *,
+        language: str | None = None,
+        top_k: int | None = None,
+        session=None,
+    ):
         self.chat_calls.append(message)
+        self.sessions.append(session)
         return SimpleNamespace(
             as_dict=lambda: {
                 "question": message,
@@ -125,6 +134,58 @@ def test_chat_calls_pipeline_and_requires_message(pipeline_api) -> None:
     assert pipeline.chat_calls == ["Tôi thích Inception, gợi ý game story rich"]
 
     assert client.post("/chat", json={"message": "   "}).status_code == 400
+
+
+def test_chat_session_round_trip_and_delete(pipeline_api) -> None:
+    client, pipeline = pipeline_api()
+    first = client.post("/chat", json={"message": "recommend a movie"}).json()
+    session_id = first["session_id"]
+    second = client.post(
+        "/chat", json={"message": "something else", "session_id": session_id}
+    ).json()
+    assert second["session_id"] == session_id
+    assert pipeline.sessions[0] is pipeline.sessions[1]
+
+    deleted = client.delete(f"/session/{session_id}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"session_id": session_id, "deleted": True}
+
+
+def test_chat_logs_do_not_include_user_text(pipeline_api, caplog) -> None:
+    caplog.set_level("INFO")
+    client, _pipeline = pipeline_api()
+    private_text = "private phrase for logging test"
+    client.post("/chat", json={"message": private_text})
+    assert private_text not in caplog.text
+
+
+def test_session_store_expires_and_caps_sessions(monkeypatch) -> None:
+    import entdec.api.main as api_main
+
+    now = [100.0]
+    monkeypatch.setattr(api_main.time, "monotonic", lambda: now[0])
+    store = api_main.SessionStore(ttl_minutes=1, max_sessions=1, memory_turns=4)
+    original = store.get("old")
+    now[0] += 61
+    assert store.get("old") is not original
+    store.get("new")
+    assert "old" not in store._sessions
+
+
+def test_chat_without_memory_returns_null_session_id(pipeline_api, monkeypatch, make_config) -> None:
+    from fastapi.testclient import TestClient
+
+    from entdec.api.main import create_app
+
+    cfg = make_config("tiny")
+    cfg.env.entdec_memory_enabled = False
+    app = create_app(cfg, no_graph=True)
+    pipeline = _FakePipeline()
+    app.state.pipeline = pipeline
+    response = TestClient(app).post("/chat", json={"message": "hello"})
+    assert response.status_code == 200
+    assert response.json()["session_id"] is None
+    assert pipeline.sessions == [None]
 
 
 def test_recommend_truncates_and_validates(pipeline_api) -> None:
