@@ -355,6 +355,19 @@ def test_named_feedback_is_resolved_by_code_before_intent_parser(
     assert "Inception (2010)" in result.resolved_references
 
 
+def test_violence_constraint_is_not_fuzzy_resolved_as_a_title(
+    catalogue_cfg: Config, monkeypatch
+) -> None:
+    monkeypatch.setattr(pipe_mod, "GraphRetriever", _BrokenGraph)
+    pipeline = ChatPipeline(catalogue_cfg, client=_mock_client(_EchoHandler()))
+    session = ChatSession()
+    session.recent_domain = "movie"
+    result = pipeline.run("less violence", session=session)
+
+    assert "violence" not in result.intent.exclude
+    assert "avoid:violence" in session.recent_constraints
+
+
 def test_stateless_pipeline_does_not_exclude_prior_turn_items(
     catalogue_cfg: Config, monkeypatch
 ) -> None:

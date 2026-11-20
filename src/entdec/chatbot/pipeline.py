@@ -967,20 +967,12 @@ class ChatPipeline:
                     intent.themes = list(session.recent_themes)
             if follow_up and session.recent_constraints and not _has_constraint_change(question):
                 for constraint in session.recent_constraints:
-                    if constraint.startswith("avoid:"):
-                        intent.exclude = list(dict.fromkeys(
-                            [*intent.exclude, constraint.split(":", maxsplit=1)[1]]
-                        ))
-                    else:
+                    if not constraint.startswith("avoid:"):
                         intent.themes = list(dict.fromkeys([*intent.themes, constraint]))
             if _is_lighter_request(question) and not _is_less_violent_request(question):
                 intent.themes = list(dict.fromkeys([*intent.themes, "cosy"]))
             for constraint in feedback_constraints:
-                if constraint.startswith("avoid:"):
-                    intent.exclude = list(dict.fromkeys(
-                        [*intent.exclude, constraint.split(":", maxsplit=1)[1]]
-                    ))
-                else:
+                if not constraint.startswith("avoid:"):
                     intent.themes = list(dict.fromkeys([*intent.themes, constraint]))
             if explicit_domain:
                 intent.domain = explicit_domain
