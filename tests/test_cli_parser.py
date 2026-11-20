@@ -35,3 +35,11 @@ def test_crosseval_arguments_work_before_or_after_command() -> None:
         True,
         True,
     )
+
+
+def test_chat_memory_commands_parse() -> None:
+    parser = build_parser()
+    chat = parser.parse_args(["chat", "--profile", "tiny", "--no-memory"])
+    evaluation = parser.parse_args(["chateval", "--profile", "tiny"])
+    assert chat.no_memory is True
+    assert evaluation.command == "chateval"

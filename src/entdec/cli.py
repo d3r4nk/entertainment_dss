@@ -29,6 +29,7 @@ COMMAND_MODULES: dict[str, tuple[str, str]] = {
     "cross": ("entdec.recsys.cross_domain", "cross-domain persona recommendations"),
     "crosseval": ("entdec.recsys.cross_eval", "evaluate cross-domain recommendation proxies"),
     "chat": ("entdec.chatbot.cli", "interactive chatbot (CLI)"),
+    "chateval": ("entdec.chatbot.eval", "evaluate conversational memory"),
     "api": ("entdec.api.main", "serve the FastAPI app"),
     "ui": ("entdec.ui.app", "run the Streamlit UI"),
     "all": ("entdec.pipeline", "run the whole pipeline for a profile"),
@@ -91,6 +92,7 @@ _EXTRA_ARGS: dict[str, list[tuple[tuple[str, ...], dict]]] = {
         (("--question",), {"type": str, "default": None, "help": "ask one question and exit"}),
         (("--language",), {"type": str, "default": None, "help": "answer language (default vi)"}),
         (("--no-graph",), {"action": "store_true", "help": "skip Neo4j; use local Parquet retrieval"}),
+        (("--no-memory",), {"action": "store_true", "help": "disable conversational memory"}),
     ],
     "api": [
         (("--host",), {"type": str, "default": "127.0.0.1"}),

@@ -1,0 +1,162 @@
+# Three-turn, service-backed conversational memory evaluation set.
+conversations:
+  - name: vn-inception-to-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tôi thích Inception, gợi ý vài game có cốt truyện hay"
+      - "cái thứ hai là gì?"
+      - "cho tôi thêm vài game nữa"
+  - name: vn-horror-topic-switch
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Gợi ý phim kinh dị tâm lý"
+      - "phim thứ 2 là gì?"
+      - "giờ gợi ý game nhẹ nhàng hơn"
+  - name: vn-open-world-switch
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tìm game thế giới mở để khám phá"
+      - "cái thứ 2 là gì?"
+      - "chuyển sang phim phiêu lưu"
+  - name: vn-comedy-more
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Muốn xem phim hài nhẹ nhàng"
+      - "cái thứ hai là gì?"
+      - "cho thêm vài phim nữa"
+  - name: vn-hades-movies
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tôi thích Hades, gợi ý phim hành động"
+      - "phim thứ hai là gì?"
+      - "ít bạo lực hơn nhé"
+  - name: vn-story-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Gợi ý game có cốt truyện sâu sắc"
+      - "cái thứ hai là gì?"
+      - "thêm game cùng kiểu"
+  - name: vn-romance-switch
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tìm phim lãng mạn để xem"
+      - "phim thứ hai là gì?"
+      - "đổi sang game phiêu lưu"
+  - name: vn-puzzle-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tôi muốn chơi game giải đố"
+      - "game thứ hai là gì?"
+      - "cho thêm game nữa"
+  - name: vn-drama-switch
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Gợi ý phim tâm lý"
+      - "phim thứ hai là gì?"
+      - "giờ muốn game thế giới mở"
+  - name: vn-cosy-movies
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Tìm phim nhẹ nhàng, dễ chịu"
+      - "cái thứ hai là gì?"
+      - "tôi không thích cái đó, gợi ý phim khác"
+  - name: en-inception-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "I like Inception. Recommend story-rich games."
+      - "What is the second one?"
+      - "Give me a few more games"
+  - name: en-horror-switch
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Recommend psychological horror movies"
+      - "What is the second one?"
+      - "Now switch to lighter games"
+  - name: en-open-world-switch
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Find open-world exploration games"
+      - "Describe the second one"
+      - "Switch to adventure movies"
+  - name: en-comedy-more
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Recommend a light comedy movie"
+      - "What is the second one?"
+      - "Show me more movies"
+  - name: en-hades-movies
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "I like Hades. Suggest action movies."
+      - "What is the second one?"
+      - "Something less violent"
+  - name: en-story-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Find games with a deep story"
+      - "Describe the second one"
+      - "More games like those"
+  - name: en-romance-switch
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "Recommend romance movies"
+      - "What is the second one?"
+      - "Now recommend adventure games instead"
+  - name: en-puzzle-games
+    expected_reference_position: 2
+    expected_topic_domain: game
+    recommendation_turns: [0, 2]
+    turns:
+      - "I want to play puzzle games"
+      - "What is the second one?"
+      - "Give me another game"
+  - name: en-drama-switch
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Recommend psychological drama movies"
+      - "Describe the second one"
+      - "Now recommend open-world games"
+  - name: en-cosy-movies
+    expected_reference_position: 2
+    expected_topic_domain: movie
+    recommendation_turns: [0, 2]
+    turns:
+      - "Find a cosy movie"
+      - "What is the second one?"
+      - "I have already seen that one; recommend another movie"
