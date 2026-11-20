@@ -210,7 +210,7 @@ def resolve_items(data: pd.DataFrame, liked_items: list[str], key: str) -> dict[
         if matches:
             raw = int(matches[0][2])
             resolved[raw] = titles[raw]
-            logger.info("fuzzy-resolved %r -> %r", wanted, titles[raw])
+            logger.info("fuzzy-resolved catalogue title")
     return resolved
 
 
