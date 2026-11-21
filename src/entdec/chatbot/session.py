@@ -227,12 +227,88 @@ class ChatSession:
         self.liked_references.clear()
         self.clear_recent_context()
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-compatible state for durable conversation storage."""
+        return {
+            "session_id": self.session_id,
+            "language": self.language,
+            "memory_turns": self.memory_turns,
+            "turns": [
+                {
+                    "user_message": turn.user_message,
+                    "intent": turn.intent,
+                    "resolved_references": [
+                        [title, domain, item_id]
+                        for title, (domain, item_id) in turn.resolved_references.items()
+                    ],
+                    "items": turn.items,
+                    "answer": turn.answer,
+                    "created_at": turn.created_at,
+                }
+                for turn in self.turns
+            ],
+            "liked_ids": _sets_to_dict(self.liked_ids),
+            "excluded_ids": _sets_to_dict(self.excluded_ids),
+            "recommended_ids": _sets_to_dict(self.recommended_ids),
+            "liked_references": [
+                [title, domain, item_id]
+                for title, (domain, item_id) in self.liked_references.items()
+            ],
+            "recent_domain": self.recent_domain,
+            "recent_genres": self.recent_genres,
+            "recent_themes": self.recent_themes,
+            "recent_constraints": self.recent_constraints,
+        }
+
+    @classmethod
+    def from_dict(cls, state: dict[str, Any], *, memory_turns: int | None = None) -> ChatSession:
+        """Rebuild bounded memory from persisted, code-generated state."""
+        session = cls(
+            session_id=str(state.get("session_id") or uuid.uuid4()),
+            language=str(state.get("language", "vi")),
+            memory_turns=int(memory_turns or state.get("memory_turns", 4)),
+        )
+        session.turns = [
+            ChatTurn(
+                user_message=str(row["user_message"]),
+                intent=dict(row.get("intent", {})),
+                resolved_references={
+                    str(title): (str(domain), int(item_id))
+                    for title, domain, item_id in row.get("resolved_references", [])
+                },
+                items=list(row.get("items", [])),
+                answer=str(row.get("answer", "")),
+                created_at=float(row.get("created_at", time.time())),
+            )
+            for row in state.get("turns", [])
+        ][-session.memory_turns :]
+        session.liked_ids = _dict_to_sets(state.get("liked_ids", {}))
+        session.excluded_ids = _dict_to_sets(state.get("excluded_ids", {}))
+        session.recommended_ids = _dict_to_sets(state.get("recommended_ids", {}))
+        session.liked_references = {
+            str(title): (str(domain), int(item_id))
+            for title, domain, item_id in state.get("liked_references", [])
+        }
+        session.recent_domain = state.get("recent_domain")
+        session.recent_genres = list(state.get("recent_genres", []))[:8]
+        session.recent_themes = list(state.get("recent_themes", []))[:8]
+        session.recent_constraints = list(state.get("recent_constraints", []))[-8:]
+        return session
+
 
 def _group_ids(references: dict[str, tuple[str, int]]) -> dict[str, set[int]]:
     grouped: dict[str, set[int]] = {}
     for domain, item_id in references.values():
         grouped.setdefault(domain, set()).add(int(item_id))
     return grouped
+
+
+def _sets_to_dict(values: dict[str, set[int]]) -> dict[str, list[int]]:
+    return {key: sorted(int(item_id) for item_id in item_ids) for key, item_ids in values.items()}
+
+
+def _dict_to_sets(values: dict[str, list[int]]) -> dict[str, set[int]]:
+    return {str(key): {int(item_id) for item_id in item_ids} for key, item_ids in values.items()}
 
 
 __all__ = ["ChatSession", "ChatTurn"]

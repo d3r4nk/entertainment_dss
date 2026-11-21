@@ -95,6 +95,7 @@ def make_config(tmp_path: Path) -> Callable[..., Config]:
             entdec_processed_dir=data_dir / "processed",
             entdec_reports_dir=tmp_path / "reports",
             entdec_cache_dir=tmp_path / ".cache",
+            entdec_auth_disabled=True,
         )
         profile_cfg = ProfileConfig(name=profile, **data["profiles"][profile])
         cfg = Config(
