@@ -1,5 +1,27 @@
 # Progress
 
+## P8 - Authentication and chat history (2026-11-21)
+
+- Added the dedicated MySQL 8.4 service, idempotent SQLAlchemy schema, account and
+  TOTP/recovery-code services, bearer sessions, admin CLI, API endpoints, and
+  account-scoped persistent conversations built on `ChatSession`.
+- Added the Streamlit login/register flow and per-user history sidebar. The
+  offline `python -m entdec chat` CLI remains anonymous and MySQL-free.
+- Security checklist: [x] no credentials/passwords/codes in logs; [x] `.env`
+  ignored and untracked; [x] ORM-bound queries; [x] constant-time token/code
+  comparisons; [x] only hashes of bearer/recovery/pre-auth tokens are stored;
+  [x] Fernet and database credentials come from `.env`; [x] CORS limited to
+  local Streamlit origins; [x] generic login errors; [x] recovery codes returned
+  once; [x] passwords are never returned by API responses.
+- Graph lifecycle commands now target Neo4j only, leaving MySQL and its named
+  volume untouched.
+- Validation: Ruff passed; 262 non-integration tests passed, including an API
+  app-recreation smoke test that verifies two isolated histories persist. The
+  MySQL integration test was skipped because Docker Desktop's engine was not
+  running; `auth db-up` could not connect to its named pipe.
+- Limitation: this project did not have a streaming API or token-streaming
+  pipeline before P8; authenticated turns currently run synchronously.
+
 ## 2026-11-20 - Conversational chatbot memory
 
 - Added bounded, code-built session memory with reference resolution, feedback,

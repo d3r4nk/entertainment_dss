@@ -77,6 +77,13 @@ Entertainment_decision/
 │       │   ├── eval.py              # evaluate, run - live multi-turn memory evaluation
 │       │   ├── pipeline.py          # ChatPipeline, ChatRanker - retrieval, evidence, reranking, grounded answers
 │       │   └── session.py           # ChatSession, ChatTurn - bounded code-built conversation state
+│       ├── auth\                    # Account auth and durable per-user history
+│       │   ├── __init__.py          # Auth package marker
+│       │   ├── cli.py               # MySQL setup and local account administration
+│       │   ├── conversations.py     # User-scoped conversation CRUD and chat-turn persistence
+│       │   ├── database.py          # SQLAlchemy engine and idempotent schema setup
+│       │   ├── models.py            # Account, session, audit, and conversation tables
+│       │   └── service.py           # Password, TOTP, recovery, and bearer-session service
 │       ├── llm\                     # Intent parsing, grounded answer generation, and prompts
 │       │   ├── __init__.py          # LLM package marker
 │       │   ├── generator.py         # parse_answer, generate_answer, fallback_answer - grounded responses
@@ -91,6 +98,10 @@ Entertainment_decision/
 ├── tests\                           # Synthetic unit tests and marked service integrations
 │   ├── conftest.py                  # Shared synthetic datasets, config, and filesystem fixtures
 │   ├── test_api_main.py             # Unit: FastAPI health, recommend, chat, validation, and degraded states
+│   ├── test_api_auth.py             # Unit: account endpoints and authenticated conversation history
+│   ├── test_auth_service.py          # Unit: SQLite auth, TOTP, recovery codes, and ownership isolation
+│   ├── test_auth_cli.py              # Unit: generated local credentials and no-overwrite behavior
+│   ├── test_auth_integration.py      # Integration: MySQL schema and complete auth/history workflow
 │   ├── test_chatbot_integration.py  # Integration: chatbot sample queries against live services
 │   ├── test_chatbot_memory_integration.py  # Integration: multi-turn memory and grounding
 │   ├── test_chatbot_eval.py         # Unit: 20 scripted three-turn evaluation conversations
@@ -241,6 +252,7 @@ flowchart LR
 | Python | **3.12** (a venv is required; 3.10+ supported, do **not** use 3.15 - the data stack has no wheels yet) |
 | Docker + Compose | 29.9.2 / v5.6.1, Neo4j image `neo4j:5.26-community` |
 | Ollama | 0.40.11, with `qwen3-embedding:4b` and `qwen3:4b` pulled |
+| MySQL | **8.4** in the separate `entdec-mysql` Compose service; host port 3307 |
 | Hardware the numbers below were measured on | Ryzen 7 6800H, 16 GB RAM, RTX 3050 Ti (4 GB VRAM) |
 
 ## Dataset scale: tiny vs default
@@ -306,16 +318,74 @@ py -3.12 -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 .venv/Scripts/python.exe -m pip install -e . --no-deps   # makes `python -m entdec` work
 
-cp .env.example .env      # then edit NEO4J_PASSWORD etc.; .env is git-ignored
+cp .env.example .env      # only when .env does not already exist; then set strong local secrets
 ollama pull qwen3-embedding:4b
 ollama pull qwen3:4b
 
-docker compose up -d      # entdec-neo4j: Bolt on 7688, HTTP on 7475 (heap 2G / pagecache 2G)
+docker compose up -d      # entdec-neo4j (7688/7475) and entdec-mysql (3307)
+.venv/Scripts/python.exe -m entdec auth init-db
 ```
 
 Do not change the ports: host ports **7688** (Bolt) and **7475** (HTTP) point at this
 project's container `entdec-neo4j`; the standard ports 7474/7687 may be occupied by an
-unrelated container and are not touched by the compose file.
+unrelated container and are not touched by the compose file. MySQL runs in its own
+container so each database service has a separate process and lifecycle.
+
+## Accounts and chat history
+
+The Streamlit UI and FastAPI API share the auth and conversation service layer.
+Account records, password hashes, encrypted TOTP seeds, recovery-code hashes, hashed
+bearer tokens, and per-account conversations/messages are stored in MySQL; chat
+memory is rebuilt from the stored `ChatSession` state for each conversation.
+
+```mermaid
+flowchart LR
+    ui[Streamlit UI] --> auth[Auth and conversation service]
+    api[FastAPI] --> auth
+    cli[Local admin CLI] --> auth
+    auth --> mysql[(MySQL 8.4)]
+    auth --> pipeline[Chat pipeline]
+    pipeline --> neo4j[(Neo4j)]
+    pipeline --> ollama[Local Ollama]
+```
+
+For an existing `.env`, add the MySQL and `ENTDEC_SECRET_KEY` settings from
+`.env.example` without replacing existing values; `auth db-up` creates `.env` with
+strong local values only when the file is absent. `ENTDEC_DB_URL` must point to
+`127.0.0.1:3307`, and `ENTDEC_SECRET_KEY` must be a Fernet key. Then run
+`python -m entdec auth db-up` and `python -m entdec auth init-db`. Scan the registration QR code with Google
+Authenticator (or any compatible SHA1/6-digit/30-second TOTP app), confirm the first
+code, and save the one-time recovery codes.
+
+The API is documented at `http://127.0.0.1:8000/docs`. Register at
+`POST /auth/register`, confirm at `POST /auth/register/confirm-2fa`, then obtain a
+short-lived password step at `POST /auth/login` and exchange it with a TOTP or
+recovery code at `POST /auth/login/2fa`. Send the returned bearer token as
+`Authorization: Bearer <token>` to `/auth/me`, `/auth/logout`, and the
+`/conversations` endpoints. Conversation history supports create/list/search,
+open, rename, soft-delete, delete-all, and per-conversation chat turns. The
+legacy `/chat` endpoint is available without login only when
+`ENTDEC_AUTH_DISABLED=1`; the offline `python -m entdec chat` CLI remains anonymous
+and does not require MySQL.
+
+Admin command reference:
+
+```powershell
+.\.venv\Scripts\python.exe -m entdec auth db-up
+.\.venv\Scripts\python.exe -m entdec auth init-db
+.\.venv\Scripts\python.exe -m entdec auth list-users
+.\.venv\Scripts\python.exe -m entdec auth reset-2fa --email person@example.com
+.\.venv\Scripts\python.exe -m entdec auth delete-user --email person@example.com
+```
+
+There is no email verification, email-based password reset, or SMTP integration.
+Registration of an existing address returns `409` because the caller needs to know
+that it cannot proceed, a deliberate trade-off against strict registration
+anti-enumeration. Lost authenticators require a saved recovery code or a local
+administrator reset. MySQL is single-node and endpoint rate limiting is in-process.
+Losing `ENTDEC_SECRET_KEY` makes stored TOTP seeds undecryptable, so affected users
+must re-enroll through an administrator. The current chat pipeline is synchronous
+and has no token-streaming interface.
 
 Datasets go to (both are treated as **read-only**, never modified):
 
@@ -346,6 +416,8 @@ rebuilds the selected step's outputs. `--profile tiny` (500 items + 1 000 users 
 .venv/Scripts/python.exe -m entdec texts     --profile tiny     # item documents and chunks for embedding (+ --force)
 .venv/Scripts/python.exe -m entdec embed     --profile tiny     # Ollama embeddings, resumable shard cache (+ --limit N, --domain movie|game, --force)
 .venv/Scripts/python.exe -m entdec graph up                     # start the one Neo4j container
+.venv/Scripts/python.exe -m entdec auth db-up                   # start only entdec-mysql and wait for health
+.venv/Scripts/python.exe -m entdec auth init-db                 # create auth/history tables idempotently
 .venv/Scripts/python.exe -m entdec graph status --profile tiny  # loaded profile, counts, dump sizes/dates
 .venv/Scripts/python.exe -m entdec graph use --profile tiny     # restore matching dump, or safely build + dump
 .venv/Scripts/python.exe -m entdec graph dump --profile tiny    # offline neo4j-admin dump (--force to replace)
@@ -376,7 +448,8 @@ local Parquet retrieval (the whole-pipeline command still runs data/recsys steps
 
 ### One-container graph switching
 
-Only `entdec-neo4j` (`neo4j:5.26-community`, Bolt 7688 / HTTP 7475) is managed here;
+Only `entdec-neo4j` (`neo4j:5.26-community`, Bolt 7688 / HTTP 7475) is managed by
+the graph lifecycle commands;
 the unrelated `movie-neo4j` on 7687/7474 is never addressed. The named `/data` volume
 is preserved. A dump and metadata file live at
 `.cache/graph_dumps/<profile>.dump` and `<profile>.meta.json` (both ignored by Git).
@@ -413,7 +486,7 @@ Tests:
 
 ```bash
 .venv/Scripts/python.exe -m pytest -m "not integration"   # fast, no Docker/Ollama
-.venv/Scripts/python.exe -m pytest -m integration         # needs Docker Neo4j + Ollama
+.venv/Scripts/python.exe -m pytest -m integration         # needs Docker MySQL/Neo4j and/or Ollama
 .venv/Scripts/python.exe -m ruff check src tests
 ```
 
@@ -434,9 +507,9 @@ docker compose stop
 docker compose start
 ```
 
-`docker compose up -d` creates/starts this project's `entdec-neo4j` service;
-`stop` retains the container and data volume, and `start` resumes that stopped
-service.
+`docker compose up -d` starts both project services. The manual `docker compose
+stop` / `start` commands apply to all services; graph CLI lifecycle commands target
+only Neo4j, and `python -m entdec auth db-up` targets only MySQL.
 
 ### Data and recommendation pipeline
 
@@ -517,8 +590,9 @@ command again. `chat`, `api`, and `ui` also accept `--no-graph`.
 
 ### Conversation memory
 
-CLI interactive chats, API clients that reuse `session_id`, and the Streamlit
-page keep a bounded conversation session. The default retains the last four
+CLI interactive chats keep an anonymous bounded in-memory session. Authenticated API
+and Streamlit conversations retain their messages and bounded `ChatSession` state in
+MySQL, isolated by account and conversation. The default retains the last four
 turns and code-built facts: parsed intent, resolved catalogue references,
 items already shown, explicit likes/dislikes, and recent domain/theme/genre
 constraints. Position phrases such as “cái thứ hai” and “the second one” refer
@@ -527,18 +601,18 @@ repeat requests may show prior recommendations again.
 
 Memory is assembled only from the new user message and verified catalogue
 results/references. Previous assistant answers are kept only for CLI/UI history
-display and are never fed back to the intent parser. It is not persistent
-personalization: CLI and Streamlit state lives for that process/page session;
-API state is in memory only, expires after 60 minutes by default, and is capped
-at 100 sessions. Nothing is written to a database or retained after the process
-ends. Avoid putting sensitive information in chat messages.
+display and are never fed back to the intent parser. The authenticated API uses
+seven-day sliding bearer sessions by default; adjust
+`auth.session_lifetime_days` in `config/settings.yaml`. In local development,
+`ENTDEC_AUTH_DISABLED=1` enables anonymous API/UI access with in-process state.
+Avoid putting sensitive information in chat messages.
 
 Use `/reset` to clear the active CLI conversation and `/history` to display its
-bounded transcript. Streamlit has a **Cuộc trò chuyện mới** button. API
-`POST /chat` accepts an optional `session_id` and returns the session ID to
-reuse; `DELETE /session/{id}` removes it. Set `ENTDEC_MEMORY_ENABLED=false` or
-pass `chat --no-memory` to disable memory. Defaults live under `llm` in
-`config/settings.yaml`.
+bounded transcript. The Streamlit sidebar provides new/open/rename/delete actions.
+With auth disabled, API `POST /chat` uses optional in-memory `session_id` values;
+with auth enabled, it requires a bearer token and stores the turn in the selected
+conversation. Set `ENTDEC_MEMORY_ENABLED=false` or pass `chat --no-memory` to
+disable anonymous CLI memory. Defaults live under `llm` in `config/settings.yaml`.
 
 ### Quality checks
 
@@ -548,8 +622,8 @@ pass `chat --no-memory` to disable memory. Defaults live under `llm` in
 .\.venv\Scripts\ruff.exe check src tests
 ```
 
-The integration tests need the tiny Neo4j graph (and the chatbot integration
-tests also need Ollama); the unit suite does not require those live services.
+The auth integration test needs the MySQL service; graph/chatbot integration tests
+need Neo4j and/or Ollama. The unit suite does not require those live services.
 Run `python -m entdec chateval --profile tiny` for the live scripted memory
 evaluation; the latest results are in [reports/tiny/chat_memory_eval.md](reports/tiny/chat_memory_eval.md).
 
@@ -580,6 +654,9 @@ followed by `.\.venv\Scripts\python.exe -m entdec chat --profile tiny` (or launc
 default dump matches its processed data, the existing graph dump is restored
 into the same Neo4j container. Switch back with
 `.\.venv\Scripts\python.exe -m entdec graph use --profile tiny`.
+
+Graph `up` and `down` target only the `neo4j` service; profile switching, status,
+dump, restore, and reset never stop, recreate, or wipe `entdec-mysql` or its volume.
 
 **Run without Neo4j:** Add `--no-graph` to `chat`, `api`, `ui`, or `all`, or set
 `$env:ENTDEC_NO_GRAPH = "true"` in the current PowerShell session.
