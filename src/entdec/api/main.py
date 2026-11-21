@@ -187,8 +187,9 @@ def create_app(cfg=None, *, no_graph: bool = False):
     try:
         from fastapi import Depends, FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
+        from sqlalchemy.exc import OperationalError
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("fastapi is required: pip install fastapi uvicorn") from exc
+        raise RuntimeError("fastapi and SQLAlchemy are required to serve the API") from exc
 
     from entdec.auth.conversations import ConversationService
     from entdec.auth.database import init_db, make_engine, make_session_factory
@@ -266,6 +267,17 @@ def create_app(cfg=None, *, no_graph: bool = False):
         _request: Request, _exc: ConversationNotFound
     ) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": "Conversation not found."})
+
+    @app.exception_handler(OperationalError)
+    async def database_unavailable_handler(
+        _request: Request, _exc: OperationalError
+    ) -> JSONResponse:
+        logger.warning("authentication database is temporarily unavailable")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication database is temporarily unavailable."},
+            headers={"Retry-After": "5"},
+        )
 
     def request_ip(request: Request) -> str | None:
         return request.client.host if request.client else None
