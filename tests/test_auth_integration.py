@@ -94,7 +94,17 @@ def test_mysql_schema_is_idempotent_and_auth_history_flow() -> None:
             == "mocked answer"
         )
         with sessions() as db:
-            assert db.scalar(select(SchemaVersion.version)) == 1
+            assert db.scalar(select(SchemaVersion.version)) == 2
+        if engine.dialect.name == "mysql":
+            with engine.connect() as connection:
+                precision = connection.execute(
+                    text(
+                        "SELECT datetime_precision FROM information_schema.columns "
+                        "WHERE table_schema=DATABASE() AND table_name='messages' "
+                        "AND column_name='created_at'"
+                    )
+                ).scalar_one()
+            assert precision == 6
     finally:
         if service is not None:
             service.delete_user(email)

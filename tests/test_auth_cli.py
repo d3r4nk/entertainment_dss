@@ -38,6 +38,6 @@ def test_schema_initialization_is_idempotent() -> None:
         init_db(engine)
         init_db(engine)
         with make_session_factory(engine)() as session:
-            assert session.scalar(select(SchemaVersion.version)) == 1
+            assert session.scalar(select(SchemaVersion.version)) == 2
     finally:
         engine.dispose()

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Engine, create_engine, event, select
+from sqlalchemy import Engine, create_engine, event, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from entdec.auth.models import Base, SchemaVersion
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def make_engine(url: str, *, echo: bool = False) -> Engine:
@@ -41,10 +41,37 @@ def make_session_factory(engine: Engine) -> sessionmaker[Session]:
 def init_db(engine: Engine) -> None:
     """Create missing tables and record the current schema version."""
     Base.metadata.create_all(engine)
-    with Session(engine) as session, session.begin():
-        version = session.scalar(select(SchemaVersion.version).limit(1))
+    with engine.begin() as connection:
+        version = connection.scalar(select(SchemaVersion.version).limit(1))
         if version is None:
-            session.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=datetime.now(UTC)))
+            connection.execute(
+                SchemaVersion.__table__.insert().values(
+                    version=SCHEMA_VERSION,
+                    applied_at=datetime.now(UTC),
+                )
+            )
+        elif version == 1:
+            if engine.dialect.name == "mysql":
+                connection.execute(
+                    text("ALTER TABLE messages MODIFY COLUMN created_at DATETIME(6) NOT NULL")
+                )
+                connection.execute(
+                    text(
+                        "UPDATE messages AS assistant "
+                        "JOIN messages AS user_message "
+                        "ON user_message.conversation_id = assistant.conversation_id "
+                        "AND user_message.role = 'user' "
+                        "AND assistant.role = 'assistant' "
+                        "AND user_message.created_at = assistant.created_at "
+                        "SET assistant.created_at = "
+                        "TIMESTAMPADD(MICROSECOND, 1, user_message.created_at)"
+                    )
+                )
+            connection.execute(
+                update(SchemaVersion)
+                .where(SchemaVersion.version == version)
+                .values(version=SCHEMA_VERSION, applied_at=datetime.now(UTC))
+            )
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; "
