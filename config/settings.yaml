@@ -149,6 +149,14 @@ llm:
   max_sessions: 100
   memory_enabled: true
 
+# --- account authentication --------------------------------------------------
+auth:
+  session_lifetime_days: 7
+  preauth_lifetime_minutes: 5
+  unconfirmed_account_hours: 24
+  failed_login_limit: 5
+  lockout_minutes: 15
+
 # --- cross-domain personas (section 7) ----------------------------------------
 cross_domain:
   top_k: 8

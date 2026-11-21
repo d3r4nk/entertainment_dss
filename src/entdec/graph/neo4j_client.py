@@ -165,7 +165,7 @@ def _compose(args: Sequence[str], timeout_s: float = 180.0) -> subprocess.Comple
 
 def compose_up(wait_s: float = 180.0) -> bool:
     """Start Neo4j with docker compose and wait until Bolt answers."""
-    result = _compose(["up", "-d"])
+    result = _compose(["up", "-d", "neo4j"])
     if result.returncode != 0:
         logger.error("docker compose up failed: %s", (result.stderr or "").strip()[:500])
         return False
@@ -173,13 +173,13 @@ def compose_up(wait_s: float = 180.0) -> bool:
 
 
 def compose_down(volumes: bool = False) -> bool:
-    """Stop Neo4j (optionally removing the named volumes)."""
-    args = ["down"] + (["-v"] if volumes else [])
+    """Stop only Neo4j (optionally removing its container and anonymous volumes)."""
+    args = ["rm", "-sfv", "neo4j"] if volumes else ["stop", "neo4j"]
     result = _compose(args)
     if result.returncode != 0:
         logger.error("docker compose down failed: %s", (result.stderr or "").strip()[:500])
         return False
-    logger.info("neo4j stopped%s", " and volumes removed" if volumes else "")
+    logger.info("neo4j stopped%s", " and container removed" if volumes else "")
     return True
 
 

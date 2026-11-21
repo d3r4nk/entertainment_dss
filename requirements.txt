@@ -24,6 +24,13 @@ rapidfuzz>=3.6
 fastapi>=0.110
 uvicorn[standard]>=0.29
 streamlit>=1.33
+SQLAlchemy>=2.0,<3.0
+PyMySQL>=1.1
+argon2-cffi>=23.1
+pyotp>=2.9
+cryptography>=42.0
+qrcode[pil]>=7.4
+email-validator>=2.1
 
 # --- quality ---
 pytest>=8.0

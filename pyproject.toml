@@ -11,6 +11,17 @@ license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 dynamic = ["dependencies"]
 
+[project.optional-dependencies]
+auth = [
+    "SQLAlchemy>=2.0,<3.0",
+    "PyMySQL>=1.1",
+    "argon2-cffi>=23.1",
+    "pyotp>=2.9",
+    "cryptography>=42.0",
+    "qrcode[pil]>=7.4",
+    "email-validator>=2.1",
+]
+
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
@@ -33,7 +44,7 @@ ignore = ["E501"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-    "integration: requires real Docker Neo4j and/or a running Ollama server",
+    "integration: requires real Docker MySQL/Neo4j and/or a running Ollama server",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

@@ -32,6 +32,7 @@ COMMAND_MODULES: dict[str, tuple[str, str]] = {
     "chateval": ("entdec.chatbot.eval", "evaluate conversational memory"),
     "api": ("entdec.api.main", "serve the FastAPI app"),
     "ui": ("entdec.ui.app", "run the Streamlit UI"),
+    "auth": ("entdec.auth.cli", "manage account database and local users"),
     "all": ("entdec.pipeline", "run the whole pipeline for a profile"),
 }
 
@@ -103,6 +104,19 @@ _EXTRA_ARGS: dict[str, list[tuple[tuple[str, ...], dict]]] = {
     "ui": [
         (("--port",), {"type": int, "default": 8501}),
         (("--no-graph",), {"action": "store_true", "help": "skip Neo4j; use local Parquet retrieval"}),
+    ],
+    "auth": [
+        (
+            ("action",),
+            {
+                "choices": ["db-up", "init-db", "list-users", "reset-2fa", "delete-user"],
+                "help": "auth database or local account operation",
+            },
+        ),
+        (
+            ("--email",),
+            {"type": str, "default": None, "help": "account email for an admin operation"},
+        ),
     ],
     "all": [
         (("--skip-llm",), {"action": "store_true", "help": "skip Ollama dependent steps"}),

@@ -47,6 +47,9 @@ class EnvSettings(BaseSettings):
     neo4j_database: str = "neo4j"
     entdec_no_graph: bool = False
     entdec_memory_enabled: bool | None = None
+    entdec_auth_disabled: bool = False
+    entdec_db_url: str | None = None
+    entdec_secret_key: str | None = None
 
     # Ollama
     ollama_host: str = "http://localhost:11434"
