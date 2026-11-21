@@ -1,5 +1,7 @@
-# --- raw + derived data (never commit) ---
+# --- raw + derived data ---
 data/
+# Keep business-logic modules in this package trackable.
+!src/entdec/data/
 # --- secrets ---
 .env
 # --- python ---
