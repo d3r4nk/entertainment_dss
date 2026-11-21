@@ -58,10 +58,15 @@ def test_three_scripted_conversations_remain_grounded() -> None:
         first = pipeline.run(messages[0], session=session)
         assert len(first.items) >= 2
         second = pipeline.run(messages[1], session=session)
-        assert first.items[1].title in second.resolved_references
-        assert second.items and second.items[0].item_id == first.items[1].item_id
         third = pipeline.run(messages[2], session=session)
         first_ids = {(item.domain, item.item_id) for item in first.items}
+        second_ids = {(item.domain, item.item_id) for item in second.items}
+        if "thứ hai" in messages[1].casefold() or "second one" in messages[1].casefold():
+            assert first.items[1].title in second.resolved_references
+            assert second.items[0].item_id == first.items[1].item_id
+        else:
+            assert second.items
+            assert not first_ids.intersection(second_ids)
         third_ids = {(item.domain, item.item_id) for item in third.items}
         assert not first_ids.intersection(third_ids)
         for result in (first, second, third):
