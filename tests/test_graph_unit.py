@@ -118,15 +118,31 @@ def test_apply_schema_recreates_index_when_dimension_changes(fake_client: FakeCl
     assert fake_client.indexes[0]["options"]["indexConfig"]["vector.dimensions"] == 768
 
 
+def test_compose_graph_lifecycle_targets_only_neo4j(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from entdec.graph import neo4j_client
+
+    commands: list[list[str]] = []
+
+    def fake_compose(args, **_kwargs):
+        commands.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(neo4j_client, "_compose", fake_compose)
+    monkeypatch.setattr(neo4j_client, "wait_for_neo4j", lambda _timeout: True)
+
+    assert neo4j_client.compose_up()
+    assert neo4j_client.compose_down()
+    assert commands == [["up", "-d", "neo4j"], ["stop", "neo4j"]]
+
+
 # --------------------------------------------------------------------------- #
 # SIMILAR_TO computation
 # --------------------------------------------------------------------------- #
 def test_top_k_similar_excludes_self_and_ranks_correctly() -> None:
     # three documents: A, B identical, C orthogonal
-    matrix = np.array(
-
-        [[0.6, 0.8, 0.0], [0.6, 0.8, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32
-    )
+    matrix = np.array([[0.6, 0.8, 0.0], [0.6, 0.8, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
     norm = np.linalg.norm(matrix, axis=1, keepdims=True)
     matrix = matrix / norm
     rows, cols, scores = top_k_similar(matrix, k=3)

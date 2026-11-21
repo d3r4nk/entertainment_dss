@@ -43,3 +43,13 @@ def test_chat_memory_commands_parse() -> None:
     evaluation = parser.parse_args(["chateval", "--profile", "tiny"])
     assert chat.no_memory is True
     assert evaluation.command == "chateval"
+
+
+def test_auth_commands_parse() -> None:
+    parser = build_parser()
+    db_up = parser.parse_args(["auth", "db-up"])
+    init_db = parser.parse_args(["auth", "init-db"])
+    reset = parser.parse_args(["auth", "reset-2fa", "--email", "user@example.com"])
+    assert (db_up.command, db_up.action) == ("auth", "db-up")
+    assert (init_db.command, init_db.action) == ("auth", "init-db")
+    assert (reset.action, reset.email) == ("reset-2fa", "user@example.com")
