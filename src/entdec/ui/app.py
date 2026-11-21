@@ -9,11 +9,42 @@ sequential embedding/generation rule applies.
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 TITLE = "🎥🎬 Entertainment chatbot"
 DESCRIPTION = (
     "Hỏi về phim hoặc game dưới bằng tiếng Việt/Anh "
 )
+
+
+def _render_saved_message(st: Any, message: dict[str, Any]) -> None:
+    st.write(message["content"])
+    if message["role"] != "assistant" or not message.get("meta"):
+        return
+
+    meta = message["meta"]
+    references = meta.get("resolved_references", [])
+    if references:
+        st.caption("Resolved references: " + ", ".join(references))
+    items = meta.get("items", [])
+    if items:
+        columns = st.columns(min(3, len(items)))
+        for index, (column, item) in enumerate(zip(columns, items, strict=False), start=1):
+            with column:
+                themes = item.get("shared_themes", [])
+                genres = item.get("shared_genres", [])
+                evidence = ", ".join(themes[:2]) or ", ".join(genres[:2]) or "evidence"
+                score = item.get("score")
+                score_suffix = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
+                st.markdown(f"**{index}. {item.get('title', 'Recommendation')}**")
+                st.caption(evidence + score_suffix)
+                if item.get("evidence"):
+                    with st.expander("Evidence"):
+                        st.write(item["evidence"])
+    graph = "yes" if meta.get("used_graph") else "no (parquet fallback)"
+    intent = "LLM" if meta.get("intent_llm") else "rules"
+    answer = "LLM" if meta.get("answer_llm") else "template"
+    st.caption(f"graph: {graph} · intent: {intent} · answer: {answer}")
 
 
 def run(cfg, args=None) -> int:  # pragma: no cover - interactive
@@ -303,13 +334,7 @@ def main() -> None:  # pragma: no cover - interactive
         st.subheader(conversation["title"])
         for message in conversation["messages"]:
             with st.chat_message(message["role"]):
-                st.write(message["content"])
-                if message["role"] == "assistant" and message.get("meta"):
-                    for index, item in enumerate(message["meta"].get("items", []), 1):
-                        st.markdown(f"**{index}. {item.get('title', 'Recommendation')}**")
-                        if item.get("evidence"):
-                            with st.expander("Evidence"):
-                                st.write(item["evidence"])
+                _render_saved_message(st, message)
     else:
         st.subheader("Ask about movies or games")
         st.caption("Start a new chat or choose one from your conversation history.")

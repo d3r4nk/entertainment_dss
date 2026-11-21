@@ -32,6 +32,8 @@ class _MemoryPipeline:
                 "answer": "Grounded answer",
                 "language": language or "en",
                 "intent": {"domain": "game"},
+                "used_graph": False,
+                "intent_llm": True,
                 "answer_llm": False,
                 "items": [{"id": 22, "title": "Portal 2", "evidence": "story rich"}],
                 "resolved_references": [],
@@ -134,6 +136,9 @@ def test_auth_endpoints_and_user_scoped_conversation_memory(make_config) -> None
         "assistant",
     ]
     assert detail["messages"][1]["meta"]["items"][0]["title"] == "Portal 2"
+    assert detail["messages"][1]["meta"]["used_graph"] is False
+    assert detail["messages"][1]["meta"]["intent_llm"] is True
+    assert detail["messages"][1]["meta"]["fallback"] is True
     assert (
         client.patch(
             f"/conversations/{conversation_id}",
@@ -201,3 +206,5 @@ def test_auth_errors_are_generic_for_unknown_and_wrong_password(make_config) -> 
     )
     assert unknown.status_code == wrong.status_code == 401
     assert unknown.json()["detail"] == wrong.json()["detail"] == "Invalid email or password."
+
+

@@ -20,6 +20,8 @@ Entertainment_decision/
 │   ├── chat_eval_conversations.yaml # Twenty scripted three-turn memory evaluations
 │   ├── tuned_weights.yaml          # Generated validation-tuned recommender and chat weights
 │   └── cross_domain_gold_pairs.csv # Curated, unreviewed cross-domain evaluation pairs
+├── scripts\                        # Local verification utilities
+│   └── smoke_auth.py               # Real MySQL/API auth and persistent-history smoke flow
 ├── src\                            # Application source
 │   └── entdec\                     # Hybrid movies-and-games recommender package
 │       ├── __init__.py              # Package version metadata
@@ -99,9 +101,11 @@ Entertainment_decision/
 │   ├── conftest.py                  # Shared synthetic datasets, config, and filesystem fixtures
 │   ├── test_api_main.py             # Unit: FastAPI health, recommend, chat, validation, and degraded states
 │   ├── test_api_auth.py             # Unit: account endpoints and authenticated conversation history
+│   ├── test_api_outage.py           # Unit: retryable API response for database outages
 │   ├── test_auth_service.py          # Unit: SQLite auth, TOTP, recovery codes, and ownership isolation
 │   ├── test_auth_cli.py              # Unit: generated local credentials and no-overwrite behavior
 │   ├── test_auth_integration.py      # Integration: MySQL schema and complete auth/history workflow
+│   ├── test_ui_history.py            # Unit: persisted recommendation cards and evidence rendering
 │   ├── test_chatbot_integration.py  # Integration: chatbot sample queries against live services
 │   ├── test_chatbot_memory_integration.py  # Integration: multi-turn memory and grounding
 │   ├── test_chatbot_eval.py         # Unit: 20 scripted three-turn evaluation conversations
