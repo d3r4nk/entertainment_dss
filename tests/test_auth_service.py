@@ -70,6 +70,15 @@ def test_registration_hashes_password_and_encrypts_totp_seed(auth_context) -> No
     assert all(code.code_hash not in recovery for code in stored_codes)
 
 
+def test_registration_accepts_reserved_test_domain(auth_context) -> None:
+    service, sessions, _clock = auth_context
+    service.register("Smoke-User@example.test", "strong-password-24")
+
+    with sessions() as db:
+        user = db.scalar(select(User).where(User.email == "smoke-user@example.test"))
+    assert user is not None
+
+
 @pytest.mark.parametrize(
     "password",
     ["short", "password123", "alice@example.com", "alice"],

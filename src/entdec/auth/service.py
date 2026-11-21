@@ -473,10 +473,24 @@ class AuthService:
 
     @staticmethod
     def _normalize_email(email: str) -> str:
+        raw_email = email.strip()
         try:
-            address = validate_email(email.strip(), check_deliverability=False).normalized.lower()
+            address = validate_email(raw_email, check_deliverability=False).normalized.lower()
         except EmailNotValidError as exc:
-            raise AuthError(422, "Enter a valid email address.") from exc
+            domain = raw_email.rpartition("@")[2].casefold()
+            if not domain.endswith(".test"):
+                raise AuthError(422, "Enter a valid email address.") from exc
+            try:
+                address = (
+                    validate_email(
+                        raw_email,
+                        check_deliverability=False,
+                        test_environment=True,
+                    )
+                    .normalized.lower()
+                )
+            except EmailNotValidError as test_exc:
+                raise AuthError(422, "Enter a valid email address.") from test_exc
         if len(address) > 320:
             raise AuthError(422, "Enter a valid email address.")
         return address
