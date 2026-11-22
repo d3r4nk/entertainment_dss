@@ -10,8 +10,8 @@ hướng dẫn để chạy sau; không phải kết quả kiểm chứng. Chưa
 ## 2. Chuẩn bị môi trường
 
 Thực hiện trong thư mục `entertainment_dss`. Cần Python 3.12, Docker Desktop,
-Ollama và dữ liệu dự án theo README. Streamlit tối thiểu 1.37 để hỗ trợ fragment
-tự cập nhật. Cần MySQL và đăng nhập để theo dõi cùng tài khoản từ nhiều tab.
+Ollama và dữ liệu dự án theo README. Streamlit tối thiểu 1.51 để hỗ trợ tay kéo
+đổi kích thước. Cần MySQL và đăng nhập để theo dõi cùng tài khoản từ nhiều tab.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -60,8 +60,20 @@ khi không sử dụng Neo4j, nhưng vẫn cần dữ liệu và artefact local.
    Đây là streaming theo dòng, không phải hiệu ứng gõ chữ sau khi đã sinh xong.
 5. Khi hoàn tất, câu trả lời và lịch sử được giữ lại; khung tiến độ có thể thu gọn.
 6. Nhấn **Xem chi tiết truy vấn** dưới lượt đang chạy hoặc câu trả lời đã lưu.
-   Chat nằm bên trái và chi tiết của lượt đó mở bên phải trong cùng phiên đăng nhập.
-   Chi tiết tự cập nhật khi lượt còn chạy. Nhấn **Đóng chi tiết** để trở về bố cục một cột.
+   Chi tiết của lượt đó mở trong cùng phiên đăng nhập và tự cập nhật khi lượt còn chạy.
+
+### Điều chỉnh khung Chat và Chi tiết truy vấn
+
+- Trên màn hình rộng, mặc định **Chat 40% bên trái**, **Chi tiết truy vấn 60% bên phải**.
+  Kéo vạch giữa hai khung để đổi chiều rộng. Kéo vạch dưới từng khung để đổi chiều cao riêng.
+  Bạn cũng có thể nhấn Tab tới vạch kéo rồi dùng phím mũi tên tương ứng.
+- Cuộn riêng trong từng khung. Ô nhập câu hỏi và nút **Đóng chi tiết** nằm ngoài vùng cuộn.
+  Khi theo dõi sát cuối Chat, câu trả lời mới tự cuộn vào vùng nhìn.
+- **Đóng chi tiết** mở rộng Chat. **Mở lại chi tiết** mở đúng lượt vừa đóng với kích thước
+  đã lưu trong tab hiện tại. Trên màn hình hẹp, Chat và Chi tiết truy vấn xếp dọc.
+
+Nếu đã cài phiên bản cũ, chạy lại `python -m pip install -r requirements.txt` trong venv
+rồi khởi động lại ứng dụng để dùng tay kéo.
 
 ### Ảnh và link trên 3 thẻ gợi ý
 

@@ -107,6 +107,11 @@ def _refresh_card_images(st, pending_images: PendingImages) -> None:
     poll()
 
 
+def _clear_trace_selection(st):
+    st.session_state.pop("open_trace", None)
+    st.session_state.pop("closed_trace", None)
+
+
 def run(cfg, args=None) -> int:  # pragma: no cover - interactive
     """Start a Streamlit server via subprocess (the module needs it)."""
     import subprocess
@@ -246,7 +251,7 @@ def main() -> None:  # pragma: no cover - interactive
             except AuthError:
                 st.session_state.pop("auth_token", None)
                 st.session_state.pop("auth_user", None)
-                st.session_state.pop("open_trace", None)
+                _clear_trace_selection(st)
                 token = None
         if not token:
             st.subheader("Login / Register")
@@ -362,12 +367,12 @@ def main() -> None:  # pragma: no cover - interactive
             st.session_state.pop("auth_token", None)
             st.session_state.pop("auth_user", None)
             st.session_state.pop("selected_conversation", None)
-            st.session_state.pop("open_trace", None)
+            _clear_trace_selection(st)
             st.rerun()
         if st.button("New chat"):
             created = conversations.create(user["id"])
             st.session_state.selected_conversation = created["id"]
-            st.session_state.pop("open_trace", None)
+            _clear_trace_selection(st)
             st.rerun()
 
         search = st.text_input("Search conversations")
@@ -380,7 +385,7 @@ def main() -> None:  # pragma: no cover - interactive
                 use_container_width=True,
             ):
                 if not active:
-                    st.session_state.pop("open_trace", None)
+                    _clear_trace_selection(st)
                 st.session_state.selected_conversation = item["id"]
                 st.rerun()
             with st.expander("Rename or delete", expanded=False):
@@ -404,7 +409,7 @@ def main() -> None:  # pragma: no cover - interactive
                     conversations.delete(user["id"], item["id"])
                     if active:
                         st.session_state.pop("selected_conversation", None)
-                        st.session_state.pop("open_trace", None)
+                        _clear_trace_selection(st)
                     st.rerun()
 
     from entdec.auth.query_runs import ACTIVE, QueryRuns
@@ -424,43 +429,62 @@ def main() -> None:  # pragma: no cover - interactive
             conversation = conversations.get(user["id"], conversation_id)
         except ConversationNotFound:
             st.session_state.pop("selected_conversation", None)
-            st.session_state.pop("open_trace", None)
+            _clear_trace_selection(st)
             conversation_id = None
 
     selected_conversation, trace_id = st.session_state.get("open_trace", (None, None))
     show_trace = bool(trace_id and conversation_id == selected_conversation)
-    if show_trace:
-        chat_column, trace_column = st.columns([3, 2])
-    else:
-        chat_column = st
+    closed_trace = st.session_state.get("closed_trace")
 
-    with chat_column.container():
-        pending_images: PendingImages = []
-        if conversation:
-            st.subheader(conversation["title"])
-            for message in conversation["messages"]:
-                with st.chat_message(message["role"]):
-                    _render_saved_message(
-                        st, message, conversation_id=conversation_id, media=media,
-                        pending_images=pending_images,
-                    )
-        else:
-            st.subheader("Ask about movies or games")
-            st.caption("Start a new chat or choose one from your conversation history.")
+    from entdec.ui.workspace import DEFAULT_PANE_HEIGHT, mount_workspace_controls
 
-        _refresh_card_images(st, pending_images)
-        active = False
-        if conversation_id:
-            active = any(
-                run["status"] in ACTIVE
-                for run in runs.list(user["id"], conversation_id=conversation_id)
+    with st.container(key="entdec_workspace"):
+        # Both modes keep the composer at the same position in the widget tree.
+        chat_column, trace_column = st.columns([2, 3] if show_trace else [999, 1], gap=None)
+        with chat_column:
+            if conversation:
+                st.subheader(conversation["title"])
+            else:
+                st.subheader("Ask about movies or games")
+            reopen = st.empty()
+            if not show_trace and closed_trace and closed_trace[0] == conversation_id:
+                reopen.button(
+                    "M\u1edf l\u1ea1i chi ti\u1ebft",
+                    on_click=st.session_state.__setitem__,
+                    args=("open_trace", closed_trace),
+                )
+
+            with st.container(key="entdec_chat_scroll", height=DEFAULT_PANE_HEIGHT, border=True):
+                with st.container(key="entdec_chat_content"):
+                    pending_images: PendingImages = []
+                    if conversation:
+                        for message in conversation["messages"]:
+                            with st.chat_message(message["role"]):
+                                _render_saved_message(
+                                    st,
+                                    message,
+                                    conversation_id=conversation_id,
+                                    media=media,
+                                    pending_images=pending_images,
+                                )
+                    else:
+                        st.caption("Start a new chat or choose one from your conversation history.")
+                    _refresh_card_images(st, pending_images)
+                    active = False
+                    if conversation_id:
+                        active = any(
+                            run["status"] in ACTIVE
+                            for run in runs.list(user["id"], conversation_id=conversation_id)
+                        )
+                        live_chat(st, runs, user["id"], conversation_id)
+
+            question = st.chat_input(
+                "Your question / C\u00e2u h\u1ecfi c\u1ee7a b\u1ea1n", key="chat_prompt", disabled=active
             )
-            live_chat(st, runs, user["id"], conversation_id)
-
-    question = chat_column.chat_input("Your question / Câu hỏi của bạn", disabled=active)
-    if show_trace:
-        with trace_column:
-            trace_panel(st, runs, user["id"], conversation_id, trace_id)
+        if show_trace:
+            with trace_column:
+                trace_panel(st, runs, user["id"], conversation_id, trace_id, height=DEFAULT_PANE_HEIGHT)
+        mount_workspace_controls(st, conversation_id, trace_id if show_trace else None)
     if question:
         if conversation_id is None:
             conversation = conversations.create(user["id"])
