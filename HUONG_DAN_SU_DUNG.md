@@ -63,6 +63,21 @@ khi không sử dụng Neo4j, nhưng vẫn cần dữ liệu và artefact local.
    Chat nằm bên trái và chi tiết của lượt đó mở bên phải trong cùng phiên đăng nhập.
    Chi tiết tự cập nhật khi lượt còn chạy. Nhấn **Đóng chi tiết** để trở về bố cục một cột.
 
+### Ảnh và link trên 3 thẻ gợi ý
+
+Tối đa ba thẻ dưới lời đáp có link và ảnh giữa dòng điểm và mục **Evidence**.
+Chọn **Xem trên TMDB** để mở trang thông tin phim hoặc **Mở trên Steam** để mở
+trang cửa hàng game. Các trang này mở ở tab mới, còn chat vẫn ở tab hiện tại.
+
+Ảnh cần kết nối Internet. Với phim, giữ file `links.csv` trong thư mục dữ liệu
+MovieLens. Để hiện poster, lấy **API Read Access Token** trong tài khoản TMDB,
+thêm `TMDB_READ_ACCESS_TOKEN=<token>` vào `.env`, rồi khởi động lại Streamlit.
+Link phim vẫn dùng được nếu có ID TMDB và chưa cấu hình token. Ảnh game được
+lấy từ Steam theo ID ứng dụng, không cần token.
+
+Nếu ảnh chưa có, nguồn ngoài không truy cập được hoặc thiếu ID, thẻ vẫn giữ tên,
+điểm và **Evidence**. Tin nhắn cũ thiếu loại của từng mục tiếp tục dùng thẻ cơ bản.
+
 Không gửi lượt thứ hai trong cùng hội thoại khi lượt trước đang chờ/chạy.
 Các hội thoại khác cũng dùng chung một worker tuần tự để hạn chế tranh chấp GPU.
 Đổi trang hoặc đóng tab không huỷ công việc đã gửi, miễn tiến trình Streamlit còn chạy.

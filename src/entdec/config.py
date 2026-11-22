@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
@@ -55,6 +55,9 @@ class EnvSettings(BaseSettings):
     ollama_host: str = "http://localhost:11434"
     ollama_embed_model: str = "qwen3-embedding:4b"
     ollama_gen_model: str = "qwen3:4b"
+
+    # Optional poster lookup for the chat UI
+    tmdb_read_access_token: SecretStr | None = None
 
     # run profile
     entdec_profile: ProfileName = "tiny"

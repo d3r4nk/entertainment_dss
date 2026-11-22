@@ -9,16 +9,26 @@ sequential embedding/generation rule applies.
 from __future__ import annotations
 
 import sys
-from typing import Any
+from concurrent.futures import Future
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from entdec.ui.recommendation_media import RecommendationMedia
 
 TITLE = "🎥🎬 Entertainment chatbot"
 DESCRIPTION = (
     "Hỏi về phim hoặc game dưới bằng tiếng Việt/Anh "
 )
+PendingImages = list[tuple[Any, Future[bytes | None]]]
 
 
 def _render_saved_message(
-    st: Any, message: dict[str, Any], *, conversation_id: str | None = None
+    st: Any,
+    message: dict[str, Any],
+    *,
+    conversation_id: str | None = None,
+    media: RecommendationMedia | None = None,
+    pending_images: PendingImages | None = None,
 ) -> None:
     st.write(message["content"])
     if message["role"] != "assistant" or not message.get("meta"):
@@ -37,23 +47,64 @@ def _render_saved_message(
         st.caption("Resolved references: " + ", ".join(references))
     items = meta.get("items", [])
     if items:
-        columns = st.columns(min(3, len(items)))
-        for index, (column, item) in enumerate(zip(columns, items, strict=False), start=1):
-            with column:
-                themes = item.get("shared_themes", [])
-                genres = item.get("shared_genres", [])
-                evidence = ", ".join(themes[:2]) or ", ".join(genres[:2]) or "evidence"
-                score = item.get("score")
-                score_suffix = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
-                st.markdown(f"**{index}. {item.get('title', 'Recommendation')}**")
-                st.caption(evidence + score_suffix)
-                if item.get("evidence"):
-                    with st.expander("Evidence"):
-                        st.write(item["evidence"])
+        _render_recommendation_cards(st, items[:3], media, pending_images)
     graph = "yes" if meta.get("used_graph") else "no (parquet fallback)"
     intent = "LLM" if meta.get("intent_llm") else "rules"
     answer = "LLM" if meta.get("answer_llm") else "template"
     st.caption(f"graph: {graph} · intent: {intent} · answer: {answer}")
+
+
+def _render_recommendation_cards(st, items, media, pending_images):
+    columns = st.columns(len(items))
+    for index, (column, item) in enumerate(zip(columns, items, strict=True), start=1):
+        with column:
+            themes = item.get("shared_themes", [])
+            genres = item.get("shared_genres", [])
+            evidence = ", ".join(themes[:2]) or ", ".join(genres[:2]) or "evidence"
+            score = item.get("score")
+            score_suffix = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
+            st.markdown(f"**{index}. {item.get('title', 'Recommendation')}**")
+            st.caption(evidence + score_suffix)
+            card = media.for_item(item) if media else None
+            if card is not None:
+                if card.label and card.url:
+                    st.link_button(card.label, card.url)
+                with st.container(border=True):
+                    slot = st.empty()
+                    if card.image is not None and not card.image.done() and pending_images is not None:
+                        slot.caption("Đang tải ảnh…")
+                        pending_images.append((slot, card.image))
+                    else:
+                        image = card.image.result() if card.image and card.image.done() else None
+                        _render_card_image(slot, image)
+            if item.get("evidence"):
+                with st.expander("Evidence"):
+                    st.write(item["evidence"])
+
+
+def _render_card_image(slot, image: bytes | None) -> None:
+    if image:
+        slot.image(image)
+    else:
+        slot.caption("Chưa có ảnh minh hoạ")
+
+
+def _refresh_card_images(st, pending_images: PendingImages) -> None:
+    if not pending_images:
+        return
+
+    @st.fragment(run_every="1s")
+    def poll():
+        # Each slot is a single element placeholder from the current chat render.
+        still_loading = []
+        for slot, image in pending_images:
+            if image.done():
+                _render_card_image(slot, image.result())
+            else:
+                still_loading.append((slot, image))
+        pending_images[:] = still_loading
+
+    poll()
 
 
 def run(cfg, args=None) -> int:  # pragma: no cover - interactive
@@ -113,8 +164,10 @@ def main() -> None:  # pragma: no cover - interactive
     from entdec.chatbot.pipeline import ChatPipeline
     from entdec.config import load_config
     from entdec.graph.store import GraphStoreError, ensure_graph
+    from entdec.ui.recommendation_media import RecommendationMedia
 
     cfg = load_config(profile)
+    media = RecommendationMedia(cfg.raw_path("movie", "links.csv"), cfg.env.tmdb_read_access_token)
     graph_enabled = not (no_graph or bool(getattr(cfg.env, "entdec_no_graph", False)))
     try:
         ensure_graph(cfg, no_graph=not graph_enabled)
@@ -294,6 +347,16 @@ def main() -> None:  # pragma: no cover - interactive
 
     with st.sidebar:
         st.caption(user["email"])
+        if cfg.env.tmdb_read_access_token:
+            with st.expander("Giới thiệu"):
+                st.image(
+                    "https://www.themoviedb.org/assets/2/v4/logos/v2/"
+                    "blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg",
+                    width=90,
+                )
+                st.caption(
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB."
+                )
         if not auth_disabled and st.button("Logout"):
             auth_service.logout(st.session_state.auth_token)
             st.session_state.pop("auth_token", None)
@@ -372,15 +435,20 @@ def main() -> None:  # pragma: no cover - interactive
         chat_column = st
 
     with chat_column.container():
+        pending_images: PendingImages = []
         if conversation:
             st.subheader(conversation["title"])
             for message in conversation["messages"]:
                 with st.chat_message(message["role"]):
-                    _render_saved_message(st, message, conversation_id=conversation_id)
+                    _render_saved_message(
+                        st, message, conversation_id=conversation_id, media=media,
+                        pending_images=pending_images,
+                    )
         else:
             st.subheader("Ask about movies or games")
             st.caption("Start a new chat or choose one from your conversation history.")
 
+        _refresh_card_images(st, pending_images)
         active = False
         if conversation_id:
             active = any(
