@@ -222,6 +222,7 @@ class ChatResult:
             "items": [
                 {
                     "id": item.item_id,
+                    "domain": item.domain,
                     "title": item.title,
                     "score": round(item.scores.get("total", 0.0), 4),
                     "shared_themes": item.shared_themes,

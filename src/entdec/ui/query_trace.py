@@ -52,19 +52,26 @@ def render_progress(st, run, *, detailed=False, show_answer=True):
 def trace_button(st, conversation_id, trace_id, *, key, in_fragment=False):
     def select_trace():
         st.session_state["open_trace"] = (conversation_id, trace_id)
+        st.session_state.pop("closed_trace", None)
 
     clicked = st.button("Xem chi tiết truy vấn", key=key, on_click=select_trace)
     if clicked and in_fragment:
         st.rerun()
 
 
-def trace_panel(st, runs, user_id, conversation_id, trace_id):
+def trace_panel(st, runs, user_id, conversation_id, trace_id, *, height):
     from entdec.auth.conversations import ConversationNotFound
 
-    with st.container(height=650, border=True):
-        st.subheader("Chi tiết truy vấn")
-        st.button("Đóng chi tiết", on_click=st.session_state.pop, args=("open_trace", None))
+    def close_trace():
+        selected = st.session_state.pop("open_trace", None)
+        if selected:
+            st.session_state["closed_trace"] = selected
 
+    with st.container():
+        st.subheader("Chi tiết truy vấn")
+        st.button("Đóng chi tiết", on_click=close_trace)
+
+    with st.container(key="entdec_trace_scroll", height=height, border=True):
         def get_run():
             try:
                 run = runs.get(user_id, trace_id)

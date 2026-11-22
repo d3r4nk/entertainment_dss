@@ -23,7 +23,7 @@ rapidfuzz>=3.6
 # --- api + ui ---
 fastapi>=0.110
 uvicorn[standard]>=0.29
-streamlit>=1.37
+streamlit>=1.51
 SQLAlchemy>=2.0,<3.0
 PyMySQL>=1.1
 argon2-cffi>=23.1
