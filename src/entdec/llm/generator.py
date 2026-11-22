@@ -151,6 +151,10 @@ def generate_answer(
     ``titles`` defaults to the candidate titles implied by ``evidence_lines``.
     Returns ``(answer, used_fallback)``.
     """
+    from entdec.chatbot.progress import DELTA
+    if DELTA.get() is not None:
+        return stream_answer(client, question, evidence_lines, language, titles,
+                             temperature=temperature, num_ctx=num_ctx, max_tokens=max_tokens)
     if titles is None:
         titles = [line.split(":", 1)[0].strip() for line in evidence_lines]
     evidence = "\n".join(f"{title} | {line}" for title, line in zip(titles, evidence_lines, strict=True))
@@ -207,3 +211,64 @@ __all__ = [
     "is_vietnamese",
     "parse_answer",
 ]
+
+
+def stream_answer(client, question, evidence_lines, language, titles, **options):
+    """Emit complete validated lines; persist exactly those lines."""
+    from entdec.chatbot.progress import DELTA, OUTCOME, emit
+    titles = titles or [line.split(":", 1)[0].strip() for line in evidence_lines]
+    evidence = "\n".join(f"{title} | {line}" for title, line in zip(titles, evidence_lines, strict=True))
+    body = explain_body(question, evidence[:9000], language, n_max=len(titles)) + "\n/no_think"
+    answer, seen = [], set()
+    buffer, thinking = "", False
+
+    def accept(line):
+        for title, sentence in parse_answer(line, titles, language):
+            if title in seen:
+                continue
+            seen.add(title)
+            text = f"{len(answer) + 1}. {title}: {sentence}"
+            answer.append(text)
+            DELTA.get()(text + "\n")
+
+    def consume(final=False):
+        nonlocal buffer, thinking
+        while buffer:
+            tag = "</think>" if thinking else "<think>"
+            i = buffer.lower().find(tag)
+            newline = buffer.find("\n")
+            if i >= 0 and (thinking or newline < 0 or i <= newline):
+                buffer = buffer[i + len(tag):]
+                thinking = not thinking
+                continue
+            if thinking:
+                if final:
+                    buffer = ""
+                return
+            if newline >= 0:
+                line, buffer = buffer.split("\n", 1)
+                accept(line)
+                continue
+            if final:
+                accept(buffer)
+                buffer = ""
+            return
+
+    failed = False
+    try:
+        for piece in client.generate_stream(body, system=explain_system(language),
+                temperature=options["temperature"], num_ctx=options["num_ctx"],
+                options={"num_predict": options["max_tokens"]}):
+            buffer += piece
+            consume()
+        consume(final=True)
+    except OllamaError as exc:
+        failed = True
+        emit("answer", "warning", error=str(exc))
+    partial = bool(answer) and (failed or not _enough(list(seen), titles))
+    OUTCOME.set("partial" if partial else "llm" if answer else "template")
+    if answer:
+        return "\n".join(answer), False
+    fallback = fallback_answer(evidence_lines, language)
+    DELTA.get()(fallback)
+    return fallback, True

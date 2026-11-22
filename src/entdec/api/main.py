@@ -417,6 +417,33 @@ def create_app(cfg=None, *, no_graph: bool = False):
                 language=body.language,
             )
 
+    from entdec.auth.query_runs import QueryRuns, statistics
+
+    def trace_filters(status=None, profile=None, conversation_id=None, domain=None,
+                      answer_source=None, since=None, until=None):
+        return dict(status=status, profile=profile, conversation_id=conversation_id,
+                    domain=domain, answer_source=answer_source, since=since, until=until)
+
+    @app.get("/traces")
+    def traces(offset: int = 0, limit: int = 50,
+               filters: dict = Depends(trace_filters), user: dict = Depends(current_user)):
+        items = QueryRuns(app.state.conversations).list(user["id"], **filters)
+        offset, limit = max(0, offset), max(1, min(limit, 200))
+        return {"items": items[offset:offset + limit], "total": len(items),
+                "offset": offset, "limit": limit}
+
+    @app.get("/traces/stats")
+    def trace_stats(filters: dict = Depends(trace_filters), user: dict = Depends(current_user)):
+        return statistics(QueryRuns(app.state.conversations).list(user["id"], **filters))
+
+    @app.get("/traces/{trace_id}")
+    def trace_detail(trace_id: str, user: dict = Depends(current_user)):
+        return QueryRuns(app.state.conversations).get(user["id"], trace_id)
+
+    @app.get("/traces/{trace_id}/events")
+    def trace_events(trace_id: str, after_seq: int = 0, user: dict = Depends(current_user)):
+        return QueryRuns(app.state.conversations).get(user["id"], trace_id, max(0, after_seq))["events"]
+
     @app.get("/health")
     def health() -> dict:
         neo4j_ok = False

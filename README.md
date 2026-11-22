@@ -388,8 +388,11 @@ that it cannot proceed, a deliberate trade-off against strict registration
 anti-enumeration. Lost authenticators require a saved recovery code or a local
 administrator reset. MySQL is single-node and endpoint rate limiting is in-process.
 Losing `ENTDEC_SECRET_KEY` makes stored TOTP seeds undecryptable, so affected users
-must re-enroll through an administrator. The current chat pipeline is synchronous
-and has no token-streaming interface.
+must re-enroll through an administrator. The Streamlit chat now uses a background worker, live stage progress and validated
+line streaming. CLI and HTTP chat endpoints remain synchronous. See
+[the Vietnamese usage guide](HUONG_DAN_SU_DUNG.md) for setup, schema 3 migration,
+live Query trace, metrics and CSV/JSON/Markdown exports. This change has not yet
+been runtime-tested; no new benchmark results are claimed.
 
 Datasets go to (both are treated as **read-only**, never modified):
 

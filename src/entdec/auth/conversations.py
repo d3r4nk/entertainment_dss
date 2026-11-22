@@ -109,8 +109,13 @@ class ConversationService:
         pipeline: Any,
         *,
         language: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Run and persist one turn and its updated memory in a single transaction."""
+        from time import perf_counter
+
+        from entdec.chatbot.progress import OUTCOME, emit
+
         with self.sessions() as db, db.begin():
             conversation = self._owned(db, user_id, conversation_id)
             prior_user_message_count = (
@@ -133,6 +138,8 @@ class ConversationService:
             chat_session = ChatSession.from_dict(state, memory_turns=self.memory_turns)
             result = pipeline.run(message, language=language, session=chat_session)
             payload = result.as_dict()
+            persist_started = perf_counter()
+            emit("persist", "running")
             now = datetime.now(UTC)
             db.add(
                 Message(
@@ -153,7 +160,9 @@ class ConversationService:
                 "language": payload.get("language"),
                 "fallback": not bool(payload.get("answer_llm")),
                 "latency": payload.get("durations", {}),
-                "partial": False,
+                "partial": OUTCOME.get() == "partial",
+                "trace_id": trace_id,
+                "answer_source": OUTCOME.get(),
             }
             db.add(
                 Message(
@@ -177,6 +186,7 @@ class ConversationService:
                 "user_message": message,
                 "result": payload,
             }
+        emit("persist", "ok", duration_ms=(perf_counter() - persist_started) * 1000)
         return response
 
     @staticmethod

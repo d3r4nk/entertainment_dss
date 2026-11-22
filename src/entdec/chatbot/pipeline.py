@@ -33,6 +33,7 @@ from typing import Any
 
 import numpy as np
 
+from entdec.chatbot.progress import Progress
 from entdec.chatbot.session import ChatSession
 from entdec.config import Config
 from entdec.llm.generator import generate_answer
@@ -898,6 +899,8 @@ class ChatPipeline:
         session: ChatSession | None = None,
     ) -> ChatResult:
         """Full pipeline for one question; embedding and generation are sequential."""
+        progress = Progress()
+        progress.next("embed")
         started = time.perf_counter()
         durations: dict[str, float] = {}
 
@@ -906,6 +909,7 @@ class ChatPipeline:
         query_vector = self.question_embedding(question)
         durations["embed_s"] = time.perf_counter() - t0
 
+        progress.next("session", completed_status="ok" if query_vector is not None else "skip")
         # 2. Resolve references from prior displayed evidence before parsing.
         session_references: dict[str, tuple[str, int]] = {}
         feedback_constraints: list[str] = []
@@ -938,6 +942,7 @@ class ChatPipeline:
             ))[-8:]
             explicit_domain = rules.domain if rules.domain in {"movie", "game"} else None
 
+        progress.next("intent", completed_status="ok" if session is not None else "skip")
         # 3. intent (the parser gets the new message and a code-built summary only)
         t0 = time.perf_counter()
         intent = parse_intent(
@@ -981,6 +986,7 @@ class ChatPipeline:
                 intent.domain = selected_domain
         domains = [intent.domain] if intent.domain in {"movie", "game"} else ["movie", "game"]
 
+        progress.next("resolve")
         # 4. retrieval (graph, or parquet when Neo4j is down)
         t0 = time.perf_counter()
         references = self.resolve_references(intent.reference_titles)
@@ -990,6 +996,7 @@ class ChatPipeline:
             intent.reference_titles = list(dict.fromkeys(
                 [*intent.reference_titles, *session.liked_references]
             ))
+        progress.next("retrieval", references=sorted(references), intent=intent.model_dump())
         pools, used_graph = self.retrieve(domains, intent, question, query_vector, references)
         if session is not None:
             constraint_exclusions = [
@@ -1008,6 +1015,7 @@ class ChatPipeline:
                 }
         durations["retrieval_s"] = time.perf_counter() - t0
 
+        progress.next("rerank", used_graph=used_graph, candidates={d: len(p) for d, p in pools.items()})
         # 5. rerank
         t0 = time.perf_counter()
         items: list[Candidate] = []
@@ -1084,9 +1092,11 @@ class ChatPipeline:
         items = items[: top_k or self.rerank_k]
         durations["rerank_s"] = time.perf_counter() - t0
 
+        progress.next("evidence")
         # 6. grounded explanation
         t0 = time.perf_counter()
         evidence_lines = [candidate.evidence_line(language) for candidate in items]
+        progress.next("answer", evidence=evidence_lines, items=[{"title": i.title, "domain": i.domain, "scores": i.scores} for i in items])
         if evidence_lines:
             answer, answer_llm = self._generate(
                 question, evidence_lines, language, [item.title for item in items]
@@ -1118,6 +1128,7 @@ class ChatPipeline:
                 items,
                 answer,
             )
+        progress.next(None)
         return result
 
     def recommend(

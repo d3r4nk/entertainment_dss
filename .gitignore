@@ -23,3 +23,6 @@ htmlcov/
 cache/
 .idea/
 .vscode/
+
+# Runtime telemetry must not be committed
+logs/
