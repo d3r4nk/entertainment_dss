@@ -17,14 +17,19 @@ DESCRIPTION = (
 )
 
 
-def _render_saved_message(st: Any, message: dict[str, Any]) -> None:
+def _render_saved_message(
+    st: Any, message: dict[str, Any], *, conversation_id: str | None = None
+) -> None:
     st.write(message["content"])
     if message["role"] != "assistant" or not message.get("meta"):
         return
 
     meta = message["meta"]
-    if meta.get("trace_id"):
-        st.link_button("Query trace", f"?trace={meta['trace_id']}")
+    trace_id = meta.get("trace_id") or (meta.get("trace") or {}).get("trace_id")
+    if conversation_id and trace_id:
+        from entdec.ui.query_trace import trace_button
+
+        trace_button(st, conversation_id, trace_id, key=f"saved_trace_{message['id']}")
     if meta.get("partial"):
         st.warning("Câu trả lời chưa đầy đủ")
     references = meta.get("resolved_references", [])
@@ -97,7 +102,7 @@ def main() -> None:  # pragma: no cover - interactive
 
     import streamlit as st
 
-    st.set_page_config(page_title="Entertainment chatbot", page_icon="🎬")
+    st.set_page_config(page_title="Entertainment chatbot", page_icon="🎬", layout="wide")
     profile = "tiny"
     if "--profile" in sys.argv:
         idx = sys.argv.index("--profile")
@@ -188,6 +193,7 @@ def main() -> None:  # pragma: no cover - interactive
             except AuthError:
                 st.session_state.pop("auth_token", None)
                 st.session_state.pop("auth_user", None)
+                st.session_state.pop("open_trace", None)
                 token = None
         if not token:
             st.subheader("Login / Register")
@@ -293,10 +299,12 @@ def main() -> None:  # pragma: no cover - interactive
             st.session_state.pop("auth_token", None)
             st.session_state.pop("auth_user", None)
             st.session_state.pop("selected_conversation", None)
+            st.session_state.pop("open_trace", None)
             st.rerun()
         if st.button("New chat"):
             created = conversations.create(user["id"])
             st.session_state.selected_conversation = created["id"]
+            st.session_state.pop("open_trace", None)
             st.rerun()
 
         search = st.text_input("Search conversations")
@@ -308,6 +316,8 @@ def main() -> None:  # pragma: no cover - interactive
                 key=f"open_{item['id']}",
                 use_container_width=True,
             ):
+                if not active:
+                    st.session_state.pop("open_trace", None)
                 st.session_state.selected_conversation = item["id"]
                 st.rerun()
             with st.expander("Rename or delete", expanded=False):
@@ -331,10 +341,11 @@ def main() -> None:  # pragma: no cover - interactive
                     conversations.delete(user["id"], item["id"])
                     if active:
                         st.session_state.pop("selected_conversation", None)
+                        st.session_state.pop("open_trace", None)
                     st.rerun()
 
     from entdec.auth.query_runs import ACTIVE, QueryRuns
-    from entdec.ui.query_trace import live_chat, trace_page
+    from entdec.ui.query_trace import live_chat, trace_page, trace_panel
     runs = QueryRuns(conversations)
     runs.recover()
     page = st.sidebar.radio("Trang", ["Chat", "Query trace"],
@@ -350,21 +361,38 @@ def main() -> None:  # pragma: no cover - interactive
             conversation = conversations.get(user["id"], conversation_id)
         except ConversationNotFound:
             st.session_state.pop("selected_conversation", None)
+            st.session_state.pop("open_trace", None)
+            conversation_id = None
 
-    if conversation:
-        st.subheader(conversation["title"])
-        for message in conversation["messages"]:
-            with st.chat_message(message["role"]):
-                _render_saved_message(st, message)
+    selected_conversation, trace_id = st.session_state.get("open_trace", (None, None))
+    show_trace = bool(trace_id and conversation_id == selected_conversation)
+    if show_trace:
+        chat_column, trace_column = st.columns([3, 2])
     else:
-        st.subheader("Ask about movies or games")
-        st.caption("Start a new chat or choose one from your conversation history.")
+        chat_column = st
 
-    active = []
-    if conversation_id:
-        active = [r for r in runs.list(user["id"], conversation_id=conversation_id) if r["status"] in ACTIVE]
-        live_chat(st, runs, user["id"], conversation_id)
-    question = st.chat_input("Your question / Câu hỏi của bạn", disabled=bool(active))
+    with chat_column.container():
+        if conversation:
+            st.subheader(conversation["title"])
+            for message in conversation["messages"]:
+                with st.chat_message(message["role"]):
+                    _render_saved_message(st, message, conversation_id=conversation_id)
+        else:
+            st.subheader("Ask about movies or games")
+            st.caption("Start a new chat or choose one from your conversation history.")
+
+        active = False
+        if conversation_id:
+            active = any(
+                run["status"] in ACTIVE
+                for run in runs.list(user["id"], conversation_id=conversation_id)
+            )
+            live_chat(st, runs, user["id"], conversation_id)
+
+    question = chat_column.chat_input("Your question / Câu hỏi của bạn", disabled=active)
+    if show_trace:
+        with trace_column:
+            trace_panel(st, runs, user["id"], conversation_id, trace_id)
     if question:
         if conversation_id is None:
             conversation = conversations.create(user["id"])
