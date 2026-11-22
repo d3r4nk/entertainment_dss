@@ -59,7 +59,9 @@ khi không sử dụng Neo4j, nhưng vẫn cần dữ liệu và artefact local.
 4. Mỗi dòng trả lời xuất hiện sau khi hoàn thành và đối chiếu với ứng viên.
    Đây là streaming theo dòng, không phải hiệu ứng gõ chữ sau khi đã sinh xong.
 5. Khi hoàn tất, câu trả lời và lịch sử được giữ lại; khung tiến độ có thể thu gọn.
-6. Nhấn **Query trace** hoặc **Xem chi tiết truy vấn** để xem đúng lượt đó.
+6. Nhấn **Xem chi tiết truy vấn** dưới lượt đang chạy hoặc câu trả lời đã lưu.
+   Chat nằm bên trái và chi tiết của lượt đó mở bên phải trong cùng phiên đăng nhập.
+   Chi tiết tự cập nhật khi lượt còn chạy. Nhấn **Đóng chi tiết** để trở về bố cục một cột.
 
 Không gửi lượt thứ hai trong cùng hội thoại khi lượt trước đang chờ/chạy.
 Các hội thoại khác cũng dùng chung một worker tuần tự để hạn chế tranh chấp GPU.
@@ -71,9 +73,8 @@ chứng minh mọi câu diễn giải của LLM đều chính xác về ngữ ng
 
 ## 4. Theo dõi trực tiếp trên Query trace
 
-Mở tab thứ hai tại cùng địa chỉ và đăng nhập **cùng tài khoản**. Chọn trang
-**Query trace** trong sidebar hoặc mở liên kết `?trace=<trace_id>` từ chat.
-Trang tự cập nhật mỗi giây; nếu chưa chọn trace, sao chép ID từ bảng vào ô
+Chọn **Query trace** trong sidebar của phiên hiện tại để xem thống kê và xuất báo cáo.
+Trang tự cập nhật mỗi giây. Để xem một lượt cụ thể từ bảng, sao chép ID vào ô
 **Trace ID để theo dõi**.
 
 Trang hiển thị danh sách lượt và chi tiết sự kiện: thời điểm, thời gian xử lý,
@@ -165,10 +166,10 @@ trong đợt này được tạo bởi worker giao diện Streamlit; chưa thêm
 
 ## 8. Kịch bản demo báo cáo
 
-1. Chuẩn bị profile tiny, một tài khoản và hai tab Chat/Query trace.
+1. Chuẩn bị profile tiny và đăng nhập vào Chat.
 2. Hỏi câu gợi ý phim/game; quay lại tiến độ trước khi có câu trả lời.
-3. Quan sát từng dòng xuất hiện và trace cập nhật ở tab debug.
+3. Nhấn **Xem chi tiết truy vấn**, rồi quan sát câu trả lời bên trái và tiến trình bên phải.
 4. Hỏi tiếp “Có lựa chọn nhẹ nhàng hơn không?” để minh hoạ bộ nhớ hội thoại.
-5. Mở lại lịch sử và trace, lọc profile/ngày, xuất cả ba định dạng.
+5. Mở lại chi tiết từ lịch sử, rồi vào **Query trace** ở sidebar để lọc và xuất báo cáo.
 6. Khi có môi trường, thực hiện bộ câu hỏi mẫu và 20 hội thoại trong cấu hình
    đánh giá của dự án; ghi rõ số lượt thực chạy. Đợt bàn giao này chưa thực hiện bước đó.

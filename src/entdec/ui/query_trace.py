@@ -16,7 +16,7 @@ LABELS = {
 }
 
 
-def render_progress(st, run, *, detailed=False):
+def render_progress(st, run, *, detailed=False, show_answer=True):
     st.caption(f"{run['trace_id']} · {run['status']}")
     stages = {}
     for event in run["events"]:
@@ -35,7 +35,8 @@ def render_progress(st, run, *, detailed=False):
                 duration = (datetime.now(UTC) - datetime.fromisoformat(event["at"])).total_seconds() * 1000
             suffix = f" · {duration / 1000:.1f}s" if duration is not None else ""
             st.write(f"{LABELS.get(stage, stage)}: {event['status']}{suffix}")
-    st.markdown(run.get("answer") or "Đang chuẩn bị câu trả lời…")
+    if show_answer:
+        st.markdown(run.get("answer") or "Đang chuẩn bị câu trả lời…")
     if run["status"] == "partial":
         st.warning("Câu trả lời chưa đầy đủ. Bạn có thể gửi lại câu hỏi để tạo lượt mới.")
     if run.get("error"):
@@ -45,7 +46,52 @@ def render_progress(st, run, *, detailed=False):
                      elapsed_ms=e.get("elapsed_ms"), duration_ms=e.get("duration_ms"),
                      detail=json.dumps(e, ensure_ascii=False)) for e in run["events"]]
         st.dataframe(rows, use_container_width=True)
-        st.json(run)
+        st.json(run, expanded=False)
+
+
+def trace_button(st, conversation_id, trace_id, *, key, in_fragment=False):
+    def select_trace():
+        st.session_state["open_trace"] = (conversation_id, trace_id)
+
+    clicked = st.button("Xem chi tiết truy vấn", key=key, on_click=select_trace)
+    if clicked and in_fragment:
+        st.rerun()
+
+
+def trace_panel(st, runs, user_id, conversation_id, trace_id):
+    from entdec.auth.conversations import ConversationNotFound
+
+    with st.container(height=650, border=True):
+        st.subheader("Chi tiết truy vấn")
+        st.button("Đóng chi tiết", on_click=st.session_state.pop, args=("open_trace", None))
+
+        def get_run():
+            try:
+                run = runs.get(user_id, trace_id)
+            except ConversationNotFound:
+                return None
+            return run if run["conversation_id"] == conversation_id else None
+
+        def render(run):
+            if run is None:
+                st.warning("Không tìm thấy truy vấn trong hội thoại này.")
+                return
+            st.text(run["question"])
+            render_progress(st, run, detailed=True, show_answer=False)
+
+        initial = get_run()
+        if initial and initial["status"] in ACTIVE:
+
+            @st.fragment(run_every="1s")
+            def poll():
+                current = get_run()
+                if current is None or current["status"] not in ACTIVE:
+                    st.rerun()
+                render(current)
+
+            poll()
+        else:
+            render(initial)
 
 
 def live_chat(st, runs, user_id, conversation_id):
@@ -61,13 +107,16 @@ def live_chat(st, runs, user_id, conversation_id):
                 st.rerun()
             if latest["status"] in {"error", "interrupted"}:
                 render_progress(st, runs.get(user_id, latest["trace_id"]))
+                trace_button(st, conversation_id, latest["trace_id"],
+                             key=f"failed_trace_{latest['trace_id']}", in_fragment=True)
             return
         st.session_state[key] = True
         with st.chat_message("user"):
             st.write(latest["question"])
         with st.chat_message("assistant"):
             render_progress(st, runs.get(user_id, latest["trace_id"]))
-            st.link_button("Xem chi tiết truy vấn", f"?trace={latest['trace_id']}")
+            trace_button(st, conversation_id, latest["trace_id"],
+                         key=f"live_trace_{latest['trace_id']}", in_fragment=True)
     poll()
 
 
