@@ -155,3 +155,23 @@ class SchemaVersion(Base):
     applied_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+
+
+class QueryRun(Base):
+    __tablename__ = "query_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    owner: Mapped[str] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql"), default=utc_now
+    )
+    payload: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT(), "mysql"))
+
+
+class QueryEvent(Base):
+    __tablename__ = "query_events"
+    run_id: Mapped[str] = mapped_column(ForeignKey("query_runs.id", ondelete="CASCADE"), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT(), "mysql"))

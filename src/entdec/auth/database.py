@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from entdec.auth.models import Base, SchemaVersion
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def make_engine(url: str, *, echo: bool = False) -> Engine:
@@ -72,8 +72,47 @@ def init_db(engine: Engine) -> None:
                 .where(SchemaVersion.version == version)
                 .values(version=SCHEMA_VERSION, applied_at=datetime.now(UTC))
             )
+        elif version == 2:
+            connection.execute(update(SchemaVersion).where(SchemaVersion.version == 2)
+                               .values(version=SCHEMA_VERSION, applied_at=datetime.now(UTC)))
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; "
                 f"application requires {SCHEMA_VERSION}"
             )
+    _import_legacy_traces(engine)
+
+
+def _import_legacy_traces(engine):
+    """Idempotently preserve old message traces; never invent missing timings."""
+    import json
+
+    from entdec.auth.models import Conversation, Message, QueryEvent, QueryRun
+
+    with Session(engine) as db, db.begin():
+        for message, conversation in db.execute(
+            select(Message, Conversation).join(Conversation).where(Message.meta_json.is_not(None))
+        ):
+            try:
+                meta = json.loads(message.meta_json)
+                trace = meta.get("trace")
+                if not isinstance(trace, dict) or not trace.get("trace_id"):
+                    continue
+                run_id = str(trace["trace_id"])
+                if len(run_id) > 36 or db.get(QueryRun, run_id):
+                    continue
+                payload = dict(trace, schema_version=1, trace_id=run_id,
+                               user_id=conversation.user_id, conversation_id=conversation.id,
+                               status="complete" if trace.get("status") == "ok" else "error",
+                               created_at=trace.get("started_at") or message.created_at.isoformat(),
+                               answer=message.content, metrics={})
+                db.add(QueryRun(id=run_id, user_id=conversation.user_id,
+                                conversation_id=conversation.id, owner="legacy",
+                                status=payload["status"], created_at=message.created_at,
+                                payload=json.dumps(payload, ensure_ascii=False)))
+                db.flush()
+                for seq, event in enumerate(trace.get("events", []), 1):
+                    db.add(QueryEvent(run_id=run_id, seq=seq,
+                                      payload=json.dumps(dict(event, seq=seq), ensure_ascii=False)))
+            except (ValueError, TypeError, AttributeError):
+                continue

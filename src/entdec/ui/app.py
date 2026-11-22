@@ -23,6 +23,10 @@ def _render_saved_message(st: Any, message: dict[str, Any]) -> None:
         return
 
     meta = message["meta"]
+    if meta.get("trace_id"):
+        st.link_button("Query trace", f"?trace={meta['trace_id']}")
+    if meta.get("partial"):
+        st.warning("Câu trả lời chưa đầy đủ")
     references = meta.get("resolved_references", [])
     if references:
         st.caption("Resolved references: " + ", ".join(references))
@@ -272,6 +276,13 @@ def main() -> None:  # pragma: no cover - interactive
                                 st.error(exc.detail)
             return
 
+    if auth_disabled:
+        from entdec.auth.models import User
+        with conversations.sessions() as db, db.begin():
+            if db.get(User, user["id"]) is None:
+                db.add(User(id=user["id"], email="dev@localhost.invalid", password_hash="disabled",
+                            is_active=True, totp_enabled=False))
+
     if "pipeline" not in st.session_state:
         st.session_state.pipeline = ChatPipeline(cfg, use_graph=graph_enabled)
 
@@ -322,6 +333,16 @@ def main() -> None:  # pragma: no cover - interactive
                         st.session_state.pop("selected_conversation", None)
                     st.rerun()
 
+    from entdec.auth.query_runs import ACTIVE, QueryRuns
+    from entdec.ui.query_trace import live_chat, trace_page
+    runs = QueryRuns(conversations)
+    runs.recover()
+    page = st.sidebar.radio("Trang", ["Chat", "Query trace"],
+                            index=1 if st.query_params.get("trace") else 0)
+    if page == "Query trace":
+        trace_page(st, runs, user["id"])
+        return
+
     conversation_id = st.session_state.get("selected_conversation")
     conversation = None
     if conversation_id:
@@ -339,25 +360,23 @@ def main() -> None:  # pragma: no cover - interactive
         st.subheader("Ask about movies or games")
         st.caption("Start a new chat or choose one from your conversation history.")
 
-    question = st.chat_input("Your question / Câu hỏi của bạn")
+    active = []
+    if conversation_id:
+        active = [r for r in runs.list(user["id"], conversation_id=conversation_id) if r["status"] in ACTIVE]
+        live_chat(st, runs, user["id"], conversation_id)
+    question = st.chat_input("Your question / Câu hỏi của bạn", disabled=bool(active))
     if question:
         if conversation_id is None:
             conversation = conversations.create(user["id"])
             conversation_id = conversation["id"]
             st.session_state.selected_conversation = conversation_id
-        with st.spinner("Thinking… / Đang suy nghĩ…"):
-            try:
-                conversations.run_turn(
-                    user["id"],
-                    conversation_id,
-                    question,
-                    st.session_state.pipeline,
-                )
-                st.rerun()
-            except ConversationNotFound:
-                st.error("This conversation is no longer available.")
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Chat pipeline error: {exc}")
+        try:
+            trace_id = runs.submit(user["id"], conversation_id, question, st.session_state.pipeline)
+            st.session_state["observed_" + trace_id] = True
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Cannot submit query: {exc}")
+
 
 
 if __name__ == "__main__":  # pragma: no cover

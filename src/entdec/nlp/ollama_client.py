@@ -370,6 +370,38 @@ class OllamaClient:
             raw=body,
         )
 
+    def generate_stream(self, prompt, *, system=None, temperature=0.2, num_ctx=4096,
+                        options=None, prefill="1. "):
+        """Yield content only; never replay an interrupted response."""
+        import json
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.extend([{"role": "user", "content": prompt},
+                         {"role": "assistant", "content": prefill}])
+        payload = {"model": self.gen_model, "messages": messages, "stream": True,
+                   "think": False, "keep_alive": self.keep_alive,
+                   "options": {"temperature": temperature, "num_ctx": num_ctx, **(options or {})}}
+        try:
+            with self._client() as client, client.stream("POST", "/api/chat", json=payload) as response:
+                response.raise_for_status()
+                yield prefill
+                done = False
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    body = json.loads(line)
+                    if body.get("error"):
+                        raise OllamaError(str(body["error"]))
+                    yield str((body.get("message") or {}).get("content") or "")
+                    if body.get("done"):
+                        done = True
+                        break
+                if not done:
+                    raise OllamaError("Stream ended before completion")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise OllamaError(str(exc)) from exc
+
     # --- convenience ----------------------------------------------------------
     @classmethod
     def from_config(cls, cfg: Any) -> OllamaClient:
