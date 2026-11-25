@@ -89,6 +89,16 @@ async function request<T>(path: string, token?: string, init: RequestInit = {}):
 
 export const api = {
   request,
+  getAccountState: (token: string) => request<{ payload: Record<string, unknown>; updated_at: string | null }>('/account/state', token),
+  putAccountState: (token: string, payload: Record<string, unknown>) => request<{ payload: Record<string, unknown>; updated_at: string }>('/account/state', token, { method: 'PUT', body: JSON.stringify({ payload }) }),
+  listTraces: (token: string, filters: Record<string, string> = {}) => {
+    if (isDemoToken(token)) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 100 })
+    const query = new URLSearchParams({ offset: '0', limit: '100', ...filters })
+    return request<{ items: Record<string, unknown>[]; total: number; offset: number; limit: number }>(`/traces?${query}`, token)
+  },
+  traceStats: (token: string, filters: Record<string, string> = {}) => isDemoToken(token) ? Promise.resolve({ count: 0, statuses: {}, metrics: {} }) : request<Record<string, unknown>>(`/traces/stats?${new URLSearchParams(filters)}`, token),
+  getTrace: (token: string, id: string) => isDemoToken(token) ? Promise.reject(new ApiError('Bản demo chưa có trace.', 404)) : request<Record<string, unknown>>(`/traces/${encodeURIComponent(id)}`, token),
+  getTraceEvents: (token: string, id: string, afterSeq = 0) => isDemoToken(token) ? Promise.resolve([]) : request<Record<string, unknown>[]>(`/traces/${encodeURIComponent(id)}/events?after_seq=${afterSeq}`, token),
   me: (token: string) => isDemoToken(token) ? Promise.resolve(demoUser) : request<User>('/auth/me', token),
   register: (email: string, password: string, confirm_password: string) =>
     request<{ enrollment_token: string; totp_uri: string; totp_secret: string; qr_code_png_base64: string }>(
@@ -115,6 +125,10 @@ export const api = {
       return Promise.resolve({ items: matches.slice(offset, offset + 100), total: matches.length, offset, limit: 100 })
     }
     return request<{ items: Conversation[]; total: number; offset: number; limit: number }>(`/conversations?offset=${offset}&limit=100&search=${encodeURIComponent(search)}`, token)
+  },
+  deleteAllConversations: (token: string) => {
+    if (isDemoToken(token)) { const deleted = demoConversations.length; demoConversations = []; return Promise.resolve({ deleted }) }
+    return request<{ deleted: number }>('/conversations', token, { method: 'DELETE' })
   },
   getConversation: (token: string, id: string) => isDemoToken(token) ? Promise.resolve(demoConversation(id)) : request<Conversation>(`/conversations/${id}`, token),
   createConversation: (token: string, title = 'Cuộc trò chuyện mới') => {

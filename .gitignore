@@ -15,6 +15,9 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+web/node_modules/
+web/.env
+*.tsbuildinfo
 .mypy_cache/
 .coverage
 htmlcov/

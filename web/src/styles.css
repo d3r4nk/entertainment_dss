@@ -48,3 +48,4 @@
 @media(max-width:760px){.auth-art-content{margin:26px 0 10px}}
 
 .category-tabs button.coming-soon-tab{opacity:.6;cursor:not-allowed}.category-tabs button.coming-soon-tab small{font-size:12px;color:#0879b0;background:#eaf7fc;border-radius:20px;padding:4px 7px;letter-spacing:0}
+.trace-json{max-height:520px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:10px;background:#102538;color:#d9f4ff;padding:16px;font:12px/1.6 'DM Mono',monospace}

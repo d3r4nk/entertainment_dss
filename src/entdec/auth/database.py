@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from entdec.auth.models import Base, SchemaVersion
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def make_engine(url: str, *, echo: bool = False) -> Engine:
@@ -74,6 +74,9 @@ def init_db(engine: Engine) -> None:
             )
         elif version == 2:
             connection.execute(update(SchemaVersion).where(SchemaVersion.version == 2)
+                               .values(version=SCHEMA_VERSION, applied_at=datetime.now(UTC)))
+        elif version == 3:
+            connection.execute(update(SchemaVersion).where(SchemaVersion.version == 3)
                                .values(version=SCHEMA_VERSION, applied_at=datetime.now(UTC)))
         elif version != SCHEMA_VERSION:
             raise RuntimeError(

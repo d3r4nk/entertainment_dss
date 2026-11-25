@@ -355,9 +355,11 @@ flowchart LR
 
 For an existing `.env`, add the MySQL and `ENTDEC_SECRET_KEY` settings from
 `.env.example` without replacing existing values; `auth db-up` creates `.env` with
-strong local values only when the file is absent. `ENTDEC_DB_URL` must point to
-`127.0.0.1:3307`, and `ENTDEC_SECRET_KEY` must be a Fernet key. Then run
-`python -m entdec auth db-up` and `python -m entdec auth init-db`. Scan the registration QR code with Google
+strong local values only when the file is absent. Use port `3307` with this project's
+Docker Compose MySQL, or port `3306` for a locally installed MySQL server.
+`ENTDEC_SECRET_KEY` must be a Fernet key. For Docker MySQL run
+`python -m entdec auth db-up`; for local MySQL ensure the `entdec` database exists.
+Then run `python -m entdec auth init-db`. Scan the registration QR code with Google
 Authenticator (or any compatible SHA1/6-digit/30-second TOTP app), confirm the first
 code, and save the one-time recovery codes.
 

@@ -208,3 +208,25 @@ def test_auth_errors_are_generic_for_unknown_and_wrong_password(make_config) -> 
     assert unknown.json()["detail"] == wrong.json()["detail"] == "Invalid email or password."
 
 
+def test_account_state_is_persistent_and_scoped_to_authenticated_user(make_config) -> None:
+    client, _pipeline = _client(make_config)
+    token_a = _register_and_login(client, "state-a@example.com")
+    token_b = _register_and_login(client, "state-b@example.com")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    payload = {
+        "saved": [{"id": "journey", "kind": "game"}],
+        "completedIds": ["journey"],
+        "ratings": {"journey": "like"},
+        "taste": {"displayName": "A"},
+        "pinnedIds": [],
+    }
+
+    assert client.get("/account/state").status_code == 401
+    assert client.get("/account/state", headers=headers_a).json()["payload"] == {}
+    saved = client.put("/account/state", headers=headers_a, json={"payload": payload})
+    assert saved.status_code == 200
+    assert client.get("/account/state", headers=headers_a).json()["payload"] == payload
+    assert client.get("/account/state", headers=headers_b).json()["payload"] == {}
+
+

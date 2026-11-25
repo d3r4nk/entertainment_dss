@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, Bookmark, Check, ChevronDown, Clock3, Compass,
@@ -35,34 +35,105 @@ function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem(tokenKey) || '')
   const [user, setUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(!token)
+  const [accountDataReady, setAccountDataReady] = useState(false)
+  const [accountSyncEnabled, setAccountSyncEnabled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [taste, setTaste] = useState<TasteSettings>(defaultTaste)
   const [saved, setSaved] = useState<MediaItem[]>([])
+  const [completedIds, setCompletedIds] = useState<string[]>([])
+  const [ratings, setRatings] = useState<Record<string, 'like' | 'skip'>>({})
+  const [pinnedIds, setPinnedIds] = useState<string[]>([])
+  const [accountSyncError, setAccountSyncError] = useState('')
+  const syncQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const syncSnapshot = useRef<Record<string, unknown>>({})
   const location = useLocation()
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!token) { setUser(null); setAuthReady(true); return }
+    if (!token) { setUser(null); setAuthReady(true); setAccountDataReady(true); setAccountSyncEnabled(false); return }
     setAuthReady(false)
+    setAccountDataReady(false)
+    setAccountSyncEnabled(false)
+    setAccountSyncError('')
     api.me(token).then((current) => {
       setUser(current)
-      setTaste(readTaste(current))
-      setSaved(readSaved(current))
+      if (isDemoToken(token)) {
+        setTaste(readTaste(current)); setSaved(readSaved(current))
+        try { setCompletedIds(JSON.parse(localStorage.getItem(`entdec.web.completed.${current.id}`) || '[]')) } catch { setCompletedIds([]) }
+        try { setPinnedIds(JSON.parse(localStorage.getItem(`entdec.web.pinned.${current.id}`) || '[]')) } catch { setPinnedIds([]) }
+        const demoRatings: Record<string, 'like' | 'skip'> = {}
+        for (let index = 0; index < localStorage.length; index++) {
+          const key = localStorage.key(index)
+          if (!key?.startsWith(`entdec.web.rating.${current.id}.`)) continue
+          const value = localStorage.getItem(key)
+          if (value === 'like' || value === 'skip') demoRatings[key.slice(`entdec.web.rating.${current.id}.`.length)] = value
+        }
+        setRatings(demoRatings)
+        setAccountSyncEnabled(true)
+        return
+      }
+      return api.getAccountState(token).then(({ payload }) => {
+        setAccountSyncEnabled(true)
+        const hasServerState = Object.keys(payload).length > 0
+        if (hasServerState) {
+          setTaste({ ...defaultTaste, ...(payload.taste as Partial<TasteSettings> || {}) })
+          setSaved(Array.isArray(payload.saved) ? payload.saved as MediaItem[] : [])
+          setCompletedIds(Array.isArray(payload.completedIds) ? payload.completedIds as string[] : [])
+          setRatings(payload.ratings && typeof payload.ratings === 'object' ? payload.ratings as Record<string, 'like' | 'skip'> : {})
+          setPinnedIds(Array.isArray(payload.pinnedIds) ? payload.pinnedIds as string[] : [])
+        } else {
+          // Import the browser's existing account data once when the server has no state yet.
+          setTaste(readTaste(current))
+          setSaved(readSaved(current))
+          try { setCompletedIds(JSON.parse(localStorage.getItem(`entdec.web.completed.${current.id}`) || '[]')) } catch { setCompletedIds([]) }
+          try { setPinnedIds(JSON.parse(localStorage.getItem(`entdec.web.pinned.${current.id}`) || '[]')) } catch { setPinnedIds([]) }
+          const importedRatings: Record<string, 'like' | 'skip'> = {}
+          for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index)
+            if (!key?.startsWith(`entdec.web.rating.${current.id}.`)) continue
+            const value = localStorage.getItem(key)
+            if (value === 'like' || value === 'skip') importedRatings[key.slice(`entdec.web.rating.${current.id}.`.length)] = value
+          }
+          setRatings(importedRatings)
+        }
+      }).catch((reason: Error) => {
+        setAccountSyncEnabled(false)
+        setAccountSyncError(`Chưa tải được dữ liệu tài khoản: ${reason.message}`)
+        setTaste(readTaste(current)); setSaved(readSaved(current))
+        try { setCompletedIds(JSON.parse(localStorage.getItem(`entdec.web.completed.${current.id}`) || '[]')) } catch { setCompletedIds([]) }
+        try { setPinnedIds(JSON.parse(localStorage.getItem(`entdec.web.pinned.${current.id}`) || '[]')) } catch { setPinnedIds([]) }
+        setRatings({})
+      })
     }).catch(() => {
       sessionStorage.removeItem(tokenKey)
       setToken('')
       setUser(null)
-    }).finally(() => setAuthReady(true))
+    }).finally(() => { setAuthReady(true); setAccountDataReady(true) })
   }, [token])
 
   useEffect(() => {
-    const expireSession = () => { setToken(''); setUser(null); setSaved([]); setTaste(defaultTaste) }
+    const expireSession = () => { setToken(''); setUser(null); setSaved([]); setTaste(defaultTaste); setCompletedIds([]); setRatings({}); setPinnedIds([]) }
     window.addEventListener('entdec:session-expired', expireSession)
     return () => window.removeEventListener('entdec:session-expired', expireSession)
   }, [])
 
-  useEffect(() => { if (user) localStorage.setItem(tasteKey(user), JSON.stringify(taste)) }, [taste, user])
-  useEffect(() => { if (user) localStorage.setItem(saveKey(user), JSON.stringify(saved)) }, [saved, user])
+  useEffect(() => {
+    if (!user || !token || !accountDataReady || !accountSyncEnabled) return
+    if (isDemoToken(token)) {
+      localStorage.setItem(tasteKey(user), JSON.stringify(taste))
+      localStorage.setItem(saveKey(user), JSON.stringify(saved))
+      localStorage.setItem(`entdec.web.completed.${user.id}`, JSON.stringify(completedIds))
+      localStorage.setItem(`entdec.web.pinned.${user.id}`, JSON.stringify(pinnedIds))
+      for (const [id, value] of Object.entries(ratings)) localStorage.setItem(`entdec.web.rating.${user.id}.${id}`, value)
+      return
+    }
+    syncSnapshot.current = { taste, saved, completedIds, ratings, pinnedIds }
+    const timer = window.setTimeout(() => {
+      const payload = { ...syncSnapshot.current }
+      syncQueue.current = syncQueue.current.then(() => api.putAccountState(token, payload)).then(() => setAccountSyncError('')).catch((reason: Error) => setAccountSyncError(`Chưa đồng bộ được dữ liệu: ${reason.message}`))
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [taste, saved, completedIds, ratings, pinnedIds, user, token, accountDataReady, accountSyncEnabled])
 
   const signIn = (newToken: string) => {
     sessionStorage.setItem(tokenKey, newToken)
@@ -74,19 +145,27 @@ function App() {
     sessionStorage.removeItem(tokenKey)
     setToken('')
     setUser(null)
+    setAccountDataReady(false)
     setSaved([])
     setTaste(defaultTaste)
+    setCompletedIds([])
+    setRatings({})
+    setPinnedIds([])
     navigate('/')
   }
   const toggleSaved = (item: MediaItem) => setSaved((current) => {
     const exists = current.some((savedItem) => savedItem.id === item.id)
     return exists ? current.filter((savedItem) => savedItem.id !== item.id) : [item, ...current]
   })
-  const value: AppContextValue = { token, user, authReady, taste, setTaste, saved, toggleSaved, signIn, signOut }
+  const toggleCompleted = (id: string) => setCompletedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  const setItemRating = (id: string, rating: 'like' | 'skip' | null) => setRatings((current) => { const next = { ...current }; if (rating) next[id] = rating; else delete next[id]; return next })
+  const togglePinned = (id: string) => setPinnedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [id, ...current])
+  const value: AppContextValue = { token, user, authReady, taste, setTaste, saved, toggleSaved, completedIds, toggleCompleted, ratings, setItemRating, pinnedIds, togglePinned, signIn, signOut }
 
   return <AppContext.Provider value={value}>
     <div className="app-shell">
       <SiteHeader user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen} onSignOut={signOut} />
+      {accountSyncError && <div className="wrap" style={{ paddingTop: 12 }}><InlineError message={accountSyncError}/></div>}
       <main onClick={() => menuOpen && setMenuOpen(false)}>
         {!authReady ? <div className="page-loading"><span className="spinner" /> Đang mở GMRe…</div> : <Routes>
           <Route path="/" element={<Home onSave={toggleSaved} saved={saved} />} />
@@ -97,6 +176,7 @@ function App() {
           <Route path="/history" element={<PrivateRoute user={user}><HistoryPage token={token} /></PrivateRoute>} />
           <Route path="/saved" element={<PrivateRoute user={user}><SavedPage items={saved} onSave={toggleSaved} /></PrivateRoute>} />
           <Route path="/account" element={<PrivateRoute user={user}><AccountPage token={token} user={user} taste={taste} setTaste={setTaste} onPasswordChanged={signOut} /></PrivateRoute>} />
+          <Route path="/traces" element={<PrivateRoute user={user}><TracePage token={token} /></PrivateRoute>} />
           <Route path="/item/:id" element={<ItemPage onSave={toggleSaved} saved={saved} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>}
@@ -109,7 +189,9 @@ function App() {
 
 type AppContextValue = {
   token: string; user: User | null; authReady: boolean; taste: TasteSettings; setTaste: (taste: TasteSettings) => void
-  saved: MediaItem[]; toggleSaved: (item: MediaItem) => void; signIn: (token: string) => void; signOut: () => Promise<void>
+  saved: MediaItem[]; toggleSaved: (item: MediaItem) => void; completedIds: string[]; toggleCompleted: (id: string) => void
+  ratings: Record<string, 'like' | 'skip'>; setItemRating: (id: string, rating: 'like' | 'skip' | null) => void
+  pinnedIds: string[]; togglePinned: (id: string) => void; signIn: (token: string) => void; signOut: () => Promise<void>
 }
 const AppContext = createContext<AppContextValue | null>(null)
 function useApp() { const value = useContext(AppContext); if (!value) throw new Error('App context is missing'); return value }
@@ -122,7 +204,7 @@ function PrivateRoute({ user, children }: { user: User | null; children: ReactNo
 
 function SiteHeader({ user, menuOpen, setMenuOpen, onSignOut }: { user: User | null; menuOpen: boolean; setMenuOpen: (open: boolean) => void; onSignOut: () => void }) {
   const links = user
-    ? [{ to: '/explore', label: 'Khám phá', icon: <Compass size={16} /> }, { to: '/chatbot', label: 'Chatbot AI', icon: <Sparkles size={16} /> }, { to: '/saved', label: 'Đã lưu', icon: <Bookmark size={16} /> }]
+    ? [{ to: '/explore', label: 'Khám phá', icon: <Compass size={16} /> }, { to: '/chatbot', label: 'Chatbot AI', icon: <Sparkles size={16} /> }, { to: '/saved', label: 'Đã lưu', icon: <Bookmark size={16} /> }, { to: '/traces', label: 'Trace AI', icon: <Settings2 size={16} /> }]
     : [{ to: '/explore', label: 'Khám phá', icon: <Compass size={16} /> }, { to: '/chatbot', label: 'Chatbot AI', icon: <Sparkles size={16} /> }, { to: '/#collections', label: 'Bộ sưu tập', icon: <Library size={16} /> }]
   return <header className="site-header">
     <div className="nav-inner">
@@ -204,19 +286,17 @@ function Step({ number, icon, title, text }: { number: string; icon: string; tit
 }
 
 function MediaCard({ item, onSave, saved = false, compact = false, completed = false, onComplete }: { item: MediaItem; onSave?: (item: MediaItem) => void; saved?: boolean; compact?: boolean; completed?: boolean; onComplete?: (item: MediaItem) => void }) {
-  const { user, toggleSaved } = useApp()
+  const { user, toggleSaved, ratings, setItemRating } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
-  const ratingKey = `entdec.web.rating.${user?.id || 'guest'}.${item.id}`
-  const [rating, setRating] = useState<'like' | 'skip' | null>(() => localStorage.getItem(ratingKey) as 'like' | 'skip' | null)
+  const rating = ratings[item.id] || null
   const save = () => {
     if (!user) { navigate('/login', { state: { from: location.pathname } }); return }
     ;(onSave || toggleSaved)(item)
   }
   const rate = (next: 'like' | 'skip') => {
     if (!user) { navigate('/login', { state: { from: location.pathname } }); return }
-    setRating(next)
-    localStorage.setItem(ratingKey, next)
+    setItemRating(item.id, next)
   }
   return <article className={`media-card ${compact ? 'compact' : ''}`}>
     <Link to={`/item/${encodeURIComponent(item.id)}`} className="media-image" style={{ backgroundImage: `linear-gradient(180deg,rgba(16,17,24,.02),rgba(16,17,24,.45)),url("${item.image}")` }} aria-label={`Xem ${item.title}`}>
@@ -265,13 +345,9 @@ function ItemPage({ onSave, saved }: { onSave: (item: MediaItem) => void; saved:
 
 function SavedPage({ items, onSave }: { items: MediaItem[]; onSave: (item: MediaItem) => void }) {
   const [tab, setTab] = useState('Tất cả đã lưu')
-  const { user } = useApp()
-  const [completed, setCompleted] = useState<string[]>([])
-  useEffect(() => { try { setCompleted(JSON.parse(localStorage.getItem(`entdec.web.completed.${user?.id}`) || '[]')) } catch { setCompleted([]) } }, [user?.id])
-  useEffect(() => { if (user) localStorage.setItem(`entdec.web.completed.${user.id}`, JSON.stringify(completed)) }, [completed, user])
-  const shown = tab === 'Đã trải nghiệm' ? items.filter((item) => completed.includes(item.id)) : tab === 'Muốn xem / nghe / chơi' ? items.filter((item) => !completed.includes(item.id)) : items
-  const markCompleted = (item: MediaItem) => setCompleted((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])
-  return <div className="page-wrap wrap"><div className="page-intro page-intro-row"><div><span className="eyebrow">GÓC RIÊNG CỦA BẠN</span><h1>Danh sách <em>để dành.</em></h1><p>Những điều hay bạn muốn quay lại, khi đúng lúc.</p></div><span className="saved-counter"><Bookmark size={19}/><b>{items.length}</b><small>điều đã lưu</small></span></div><div className="segmented-tabs">{['Tất cả đã lưu', 'Muốn xem / nghe / chơi', 'Đã trải nghiệm'].map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>{shown.length ? <div className="media-grid">{shown.map((item) => <MediaCard key={item.id} item={item} saved onSave={onSave} compact completed={completed.includes(item.id)} onComplete={markCompleted}/>)}</div> : <EmptyState icon={<Bookmark size={22}/>} title={tab === 'Đã trải nghiệm' ? 'Chưa có gì ở đây' : 'Danh sách còn đang để trống'} text={tab === 'Đã trải nghiệm' ? 'Khi đã xem, nghe hoặc chơi xong, nhấn dấu tích trên thẻ để lưu lại ở đây.' : 'Gặp điều gì hợp gu, nhấn biểu tượng lưu để dành lại cho khoảng rảnh sau nhé.'} action={<Link to="/explore" className="button button-primary">Khám phá gợi ý <ArrowRight size={16}/></Link>}/>}</div>
+  const { completedIds, toggleCompleted } = useApp()
+  const shown = tab === 'Đã trải nghiệm' ? items.filter((item) => completedIds.includes(item.id)) : tab === 'Muốn xem / nghe / chơi' ? items.filter((item) => !completedIds.includes(item.id)) : items
+  return <div className="page-wrap wrap"><div className="page-intro page-intro-row"><div><span className="eyebrow">GÓC RIÊNG CỦA BẠN</span><h1>Danh sách <em>để dành.</em></h1><p>Những điều hay bạn muốn quay lại, khi đúng lúc.</p></div><span className="saved-counter"><Bookmark size={19}/><b>{items.length}</b><small>điều đã lưu</small></span></div><div className="segmented-tabs">{['Tất cả đã lưu', 'Muốn xem / chơi', 'Đã trải nghiệm'].map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>{shown.length ? <div className="media-grid">{shown.map((item) => <MediaCard key={item.id} item={item} saved onSave={onSave} compact completed={completedIds.includes(item.id)} onComplete={() => toggleCompleted(item.id)}/>)}</div> : <EmptyState icon={<Bookmark size={22}/>} title={tab === 'Đã trải nghiệm' ? 'Chưa có gì ở đây' : 'Danh sách còn đang để trống'} text={tab === 'Đã trải nghiệm' ? 'Khi đã xem hoặc chơi xong, nhấn dấu tích trên thẻ để lưu lại ở đây.' : 'Gặp điều gì hợp gu, nhấn biểu tượng lưu để dành lại cho khoảng rảnh sau nhé.'} action={<Link to="/explore" className="button button-primary">Khám phá gợi ý <ArrowRight size={16}/></Link>}/>}</div>
 }
 
 function HistoryPage({ token }: { token: string }) {
@@ -280,10 +356,7 @@ function HistoryPage({ token }: { token: string }) {
   const [items, setItems] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const { user } = useApp()
-  const [pinned, setPinned] = useState<string[]>([])
-  useEffect(() => { try { setPinned(JSON.parse(localStorage.getItem(`entdec.web.pinned.${user?.id}`) || '[]')) } catch { setPinned([]) } }, [user?.id])
-  useEffect(() => { if (user) localStorage.setItem(`entdec.web.pinned.${user.id}`, JSON.stringify(pinned)) }, [pinned, user])
+  const { pinnedIds: pinned, togglePinned } = useApp()
   useEffect(() => {
     let mounted = true
     setLoading(true); setError('')
@@ -301,11 +374,11 @@ function HistoryPage({ token }: { token: string }) {
     if (filter === 'Phim' || filter === 'Game') return item.messages?.some((message) => (message.meta?.items || []).some((entry) => String(entry.domain || '').toLowerCase() === filter.toLowerCase()))
     return true
   })
-  const togglePin = (id: string) => setPinned((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [id, ...current])
-  const remove = async (id: string) => { try { await api.deleteConversation(token, id); setItems((current) => current.filter((entry) => entry.id !== id)); setPinned((current) => current.filter((entry) => entry !== id)) } catch (reason) { setError((reason as Error).message) } }
+  const remove = async (id: string) => { try { await api.deleteConversation(token, id); setItems((current) => current.filter((entry) => entry.id !== id)); if (pinned.includes(id)) togglePinned(id) } catch (reason) { setError((reason as Error).message) } }
+  const removeAll = async () => { if (!window.confirm('Xóa toàn bộ lịch sử trò chuyện?')) return; try { await api.deleteAllConversations(token); setItems([]); for (const id of pinned) togglePinned(id) } catch (reason) { setError((reason as Error).message) } }
   const navigate = useNavigate()
-  return <div className="page-wrap wrap"><div className="page-intro"><span className="eyebrow">NHỮNG CUỘC TRÒ CHUYỆN CŨ</span><h1>Lịch sử <em>hợp gu.</em></h1><p>Mở lại những lần mình đã cùng nhau tìm thấy điều hay.</p></div><div className="history-tools"><div className="search-field"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm cuộc trò chuyện…" aria-label="Tìm lịch sử"/>{search && <button onClick={() => setSearch('')} aria-label="Xóa tìm kiếm"><X size={15}/></button>}</div><div className="filter-pills">{tabs.map((tab) => <button className={filter === tab ? 'active' : ''} onClick={() => setFilter(tab)} key={tab}>{tab === 'Đã ghim' && <Star size={13}/>} {tab}</button>)}</div></div>
-    {error && <InlineError message={error}/>} {loading ? <div className="page-loading"><span className="spinner"/> Đang tìm lại những cuộc trò chuyện…</div> : filtered.length ? <div className="history-list">{filtered.map((conversation) => <article className="history-card" key={conversation.id}><div className="history-icon"><MessageCircle size={20}/></div><div className="history-main"><Link to={`/chatbot?conversation=${conversation.id}`}><h3>{conversation.title}</h3></Link><div className="history-meta"><span><Clock3 size={13}/>{formatDate(conversation.updated_at)}</span><i/><span>{conversation.messages?.length || 0} tin nhắn</span><i/><span>{historyKind(conversation)}</span></div><div className="history-preview">{(conversation.messages || []).filter((message) => message.role === 'assistant').flatMap((message) => message.meta?.items || []).slice(0, 3).map((item, index) => <span className="history-thumb" key={`${String(item.id || item.title)}-${index}`}>{String(item.title || 'Gợi ý').slice(0, 20)}</span>)}</div></div><div className="history-actions"><button onClick={() => togglePin(conversation.id)} className={pinned.includes(conversation.id) ? 'pinned' : ''} title={pinned.includes(conversation.id) ? 'Bỏ ghim' : 'Ghim'}><Star size={16} fill={pinned.includes(conversation.id) ? 'currentColor' : 'none'}/></button><button onClick={() => navigate(`/chatbot?conversation=${conversation.id}`)} title="Tiếp tục trò chuyện"><ArrowRight size={17}/></button><button onClick={() => remove(conversation.id)} title="Xóa"><Trash2 size={16}/></button></div></article>)}</div> : <EmptyState icon={<MessageCircle size={22}/>} title={search ? 'Chưa tìm thấy cuộc trò chuyện' : 'Chưa có lịch sử trò chuyện'} text={search ? 'Thử một từ khóa khác nhé.' : 'Mỗi lần trò chuyện sẽ được lưu tại đây để bạn dễ dàng quay lại.'} action={<Link className="button button-primary" to="/chatbot">Bắt đầu trò chuyện <ArrowRight size={16}/></Link>}/>}</div>
+  return <div className="page-wrap wrap"><div className="page-intro"><span className="eyebrow">NHỮNG CUỘC TRÒ CHUYỆN CŨ</span><h1>Lịch sử <em>hợp gu.</em></h1><p>Mở lại những lần mình đã cùng nhau tìm thấy điều hay.</p></div><div className="history-tools"><div className="search-field"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm cuộc trò chuyện…" aria-label="Tìm lịch sử"/>{search && <button onClick={() => setSearch('')} aria-label="Xóa tìm kiếm"><X size={15}/></button>}</div><div className="filter-pills">{tabs.map((tab) => <button className={filter === tab ? 'active' : ''} onClick={() => setFilter(tab)} key={tab}>{tab === 'Đã ghim' && <Star size={13}/>} {tab}</button>)}<button onClick={() => void removeAll()}>Xóa tất cả</button></div></div>
+    {error && <InlineError message={error}/>} {loading ? <div className="page-loading"><span className="spinner"/> Đang tìm lại những cuộc trò chuyện…</div> : filtered.length ? <div className="history-list">{filtered.map((conversation) => <article className="history-card" key={conversation.id}><div className="history-icon"><MessageCircle size={20}/></div><div className="history-main"><Link to={`/chatbot?conversation=${conversation.id}`}><h3>{conversation.title}</h3></Link><div className="history-meta"><span><Clock3 size={13}/>{formatDate(conversation.updated_at)}</span><i/><span>{conversation.messages?.length || 0} tin nhắn</span><i/><span>{historyKind(conversation)}</span></div><div className="history-preview">{(conversation.messages || []).filter((message) => message.role === 'assistant').flatMap((message) => message.meta?.items || []).slice(0, 3).map((item, index) => <span className="history-thumb" key={`${String(item.id || item.title)}-${index}`}>{String(item.title || 'Gợi ý').slice(0, 20)}</span>)}</div></div><div className="history-actions"><button onClick={() => togglePinned(conversation.id)} className={pinned.includes(conversation.id) ? 'pinned' : ''} title={pinned.includes(conversation.id) ? 'Bỏ ghim' : 'Ghim'}><Star size={16} fill={pinned.includes(conversation.id) ? 'currentColor' : 'none'}/></button><button onClick={() => navigate(`/chatbot?conversation=${conversation.id}`)} title="Tiếp tục trò chuyện"><ArrowRight size={17}/></button><button onClick={() => remove(conversation.id)} title="Xóa"><Trash2 size={16}/></button></div></article>)}</div> : <EmptyState icon={<MessageCircle size={22}/>} title={search ? 'Chưa tìm thấy cuộc trò chuyện' : 'Chưa có lịch sử trò chuyện'} text={search ? 'Thử một từ khóa khác nhé.' : 'Mỗi lần trò chuyện sẽ được lưu tại đây để bạn dễ dàng quay lại.'} action={<Link className="button button-primary" to="/chatbot">Bắt đầu trò chuyện <ArrowRight size={16}/></Link>}/>}</div>
 }
 
 function historyKind(conversation: Conversation) {
@@ -313,6 +386,41 @@ function historyKind(conversation: Conversation) {
   if (kinds.has('movie')) return 'Phim & series'
   if (kinds.has('game')) return 'Game'
   return 'Gợi ý giải trí'
+}
+
+function TracePage({ token }: { token: string }) {
+  const [status, setStatus] = useState('')
+  const [domain, setDomain] = useState('')
+  const [items, setItems] = useState<Record<string, unknown>[]>([])
+  const [stats, setStats] = useState<Record<string, unknown>>({})
+  const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let mounted = true
+    setLoading(true); setError('')
+    const filters = { ...(status ? { status } : {}), ...(domain ? { domain } : {}) }
+    Promise.all([api.listTraces(token, filters), api.traceStats(token, filters)]).then(([list, summary]) => {
+      if (mounted) { setItems(list.items); setStats(summary) }
+    }).catch((reason: Error) => mounted && setError(reason.message)).finally(() => mounted && setLoading(false))
+    return () => { mounted = false }
+  }, [token, status, domain])
+  const openTrace = async (id: string) => {
+    setError('')
+    try {
+      const trace = await api.getTrace(token, id)
+      const events = await api.getTraceEvents(token, id)
+      setSelected({ ...trace, events })
+    }
+    catch (reason) { setError((reason as Error).message) }
+  }
+  const count = typeof stats.count === 'number' ? stats.count : items.length
+  return <div className="page-wrap wrap"><div className="page-intro"><span className="eyebrow">CÔNG CỤ THEO DÕI</span><h1>Trace <em>trợ lý.</em></h1><p>Xem trạng thái xử lý và thời gian của các lượt gợi ý thuộc tài khoản này.</p></div>
+    <div className="account-overview"><div className="account-stat"><strong>{count}</strong><span>lượt xử lý</span></div><div className="account-stat"><strong>{Object.keys((stats.statuses as object) || {}).length}</strong><span>trạng thái ghi nhận</span></div></div>
+    <div className="history-tools"><label className="select-field"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Tất cả</option>{['queued','running','complete','partial','error','interrupted'].map((item) => <option key={item}>{item}</option>)}</select><ChevronDown size={15}/></label><label className="select-field"><span>Danh mục</span><select value={domain} onChange={(event) => setDomain(event.target.value)}><option value="">Phim và game</option><option value="movie">Phim</option><option value="game">Game</option></select><ChevronDown size={15}/></label></div>
+    {error && <InlineError message={error}/>} {loading ? <div className="page-loading"><span className="spinner"/> Đang tải trace…</div> : items.length ? <div className="history-list">{items.map((item, index) => { const id = String(item.trace_id || item.id || index); return <article className="history-card" key={id}><div className="history-icon"><Settings2 size={19}/></div><div className="history-main"><button className="chat-rec-title" onClick={() => void openTrace(id)}><b>{String(item.question || 'Lượt gợi ý')}</b></button><div className="history-meta"><span>{String(item.status || '—')}</span><i/><span>{String(item.profile || 'profile chưa ghi')}</span><i/><span>{item.created_at ? formatDate(String(item.created_at)) : '—'}</span></div></div><button className="button button-outline" onClick={() => void openTrace(id)}>Chi tiết</button></article> })}</div> : <EmptyState icon={<Settings2 size={22}/>} title="Chưa có trace" text="Trace sẽ xuất hiện sau khi backend ghi nhận lượt xử lý AI."/>}
+    {selected && <section className="settings-card" style={{ marginTop: 24 }}><div className="settings-title"><div><h2>Chi tiết trace</h2><p>{String(selected.trace_id || '')} · {String(selected.status || '')}</p></div><button className="icon-button" onClick={() => setSelected(null)} aria-label="Đóng chi tiết"><X size={17}/></button></div><pre className="trace-json">{JSON.stringify(selected, null, 2)}</pre></section>}
+  </div>
 }
 function formatDate(date: string) { try { return new Intl.DateTimeFormat('vi-VN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(date)) } catch { return 'Vừa trò chuyện' } }
 
