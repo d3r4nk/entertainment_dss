@@ -1,5 +1,6 @@
 import type { ApiRecommendation, Conversation, User } from './types'
 import { catalogue } from './data'
+import type { TraceRun } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true'
@@ -29,6 +30,7 @@ let demoConversations: Conversation[] = [
     ],
   },
 ]
+const demoTraces: Record<string, TraceRun> = {}
 
 function demoConversation(id: string) {
   const conversation = demoConversations.find((item) => item.id === id)
@@ -92,13 +94,19 @@ export const api = {
   getAccountState: (token: string) => request<{ payload: Record<string, unknown>; updated_at: string | null }>('/account/state', token),
   putAccountState: (token: string, payload: Record<string, unknown>) => request<{ payload: Record<string, unknown>; updated_at: string }>('/account/state', token, { method: 'PUT', body: JSON.stringify({ payload }) }),
   listTraces: (token: string, filters: Record<string, string> = {}) => {
-    if (isDemoToken(token)) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 100 })
+    if (isDemoToken(token)) {
+      const items = Object.values(demoTraces).filter((trace) =>
+        (!filters.status || trace.status === filters.status)
+        && (!filters.conversation_id || trace.conversation_id === filters.conversation_id),
+      )
+      return Promise.resolve({ items, total: items.length, offset: 0, limit: 100 })
+    }
     const query = new URLSearchParams({ offset: '0', limit: '100', ...filters })
     return request<{ items: Record<string, unknown>[]; total: number; offset: number; limit: number }>(`/traces?${query}`, token)
   },
   traceStats: (token: string, filters: Record<string, string> = {}) => isDemoToken(token) ? Promise.resolve({ count: 0, statuses: {}, metrics: {} }) : request<Record<string, unknown>>(`/traces/stats?${new URLSearchParams(filters)}`, token),
-  getTrace: (token: string, id: string) => isDemoToken(token) ? Promise.reject(new ApiError('Bản demo chưa có trace.', 404)) : request<Record<string, unknown>>(`/traces/${encodeURIComponent(id)}`, token),
-  getTraceEvents: (token: string, id: string, afterSeq = 0) => isDemoToken(token) ? Promise.resolve([]) : request<Record<string, unknown>[]>(`/traces/${encodeURIComponent(id)}/events?after_seq=${afterSeq}`, token),
+  getTrace: (token: string, id: string) => isDemoToken(token) ? Promise.resolve(demoTraces[id]) : request<TraceRun>(`/traces/${encodeURIComponent(id)}`, token),
+  getTraceEvents: (token: string, id: string, afterSeq = 0) => isDemoToken(token) ? Promise.resolve((demoTraces[id]?.events || []).filter((event) => event.seq > afterSeq)) : request<Record<string, unknown>[]>(`/traces/${encodeURIComponent(id)}/events?after_seq=${afterSeq}`, token),
   me: (token: string) => isDemoToken(token) ? Promise.resolve(demoUser) : request<User>('/auth/me', token),
   register: (email: string, password: string, confirm_password: string) =>
     request<{ enrollment_token: string; totp_uri: string; totp_secret: string; qr_code_png_base64: string }>(
@@ -165,5 +173,49 @@ export const api = {
     return request<{ title: string; result: { answer: string; items: ApiRecommendation[] } }>(`/conversations/${id}/messages`, token, {
       method: 'POST', body: JSON.stringify({ message, language: 'vi' }),
     })
+  },
+  submitConversationRun: async (token: string, id: string, message: string, language = 'vi') => {
+    if (!isDemoToken(token)) {
+      return request<{ trace_id: string }>(`/conversations/${encodeURIComponent(id)}/runs`, token, {
+        method: 'POST', body: JSON.stringify({ message, language }),
+      })
+    }
+    const traceId = `demo-trace-${Date.now()}`
+    demoTraces[traceId] = {
+      trace_id: traceId,
+      conversation_id: id,
+      question: message,
+      status: 'queued',
+      created_at: new Date().toISOString(),
+      metrics: {},
+      events: [{ seq: 1, stage: 'queue', status: 'queued' }],
+    }
+    window.setTimeout(() => {
+      const trace = demoTraces[traceId]
+      if (!trace) return
+      trace.status = 'running'
+      trace.events = [...trace.events, { seq: 2, stage: 'retrieval', status: 'running' }]
+      window.setTimeout(() => {
+        void api.sendMessage(token, id, message).then((result) => {
+          const conversation = demoConversation(id)
+          const messages = conversation.messages || []
+          const assistant = messages[messages.length - 1]
+          if (assistant?.role === 'assistant') assistant.meta = { ...assistant.meta, trace_id: traceId }
+          trace.status = 'complete'
+          trace.answer = result.result.answer
+          trace.metrics = { total_ms: 1350 }
+          trace.events = [
+            { seq: 1, stage: 'queue', status: 'ok' },
+            { seq: 2, stage: 'retrieval', status: 'ok', duration_ms: 850 },
+            { seq: 3, stage: 'answer', status: 'ok', duration_ms: 500 },
+            { seq: 4, stage: 'done', status: 'complete' },
+          ]
+        }).catch((reason: Error) => {
+          trace.status = 'error'
+          trace.error = reason.message
+        })
+      }, 900)
+    }, 450)
+    return { trace_id: traceId }
   },
 }

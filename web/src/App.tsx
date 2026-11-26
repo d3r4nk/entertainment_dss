@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, Bookmark, Check, ChevronDown, Clock3, Compass,
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError, DEMO_MODE, DEMO_TOKEN, isDemoToken } from './api'
 import { catalogue, categories, itemById, recommendationToMedia, starterPrompts, vibes } from './data'
-import type { ApiRecommendation, Conversation, MediaItem, User } from './types'
+import type { ApiRecommendation, Conversation, MediaItem, TraceRun, User } from './types'
 
 type TasteSettings = { displayName: string; genres: string[]; platforms: string[]; novelty: number; intensity: number; emailTips: boolean; weeklyNote: boolean }
 const defaultTaste: TasteSettings = { displayName: '', genres: ['Sci-Fi', 'Tâm lý', 'Indie / Lo-fi'], platforms: ['Netflix', 'Spotify', 'Steam'], novelty: 58, intensity: 42, emailTips: true, weeklyNote: false }
@@ -461,11 +461,31 @@ function ChatPage({ token }: { token: string }) {
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pendingQuestion, setPendingQuestion] = useState('')
+  const [activeTraceId, setActiveTraceId] = useState<string | null>(null)
+  const [openTraceId, setOpenTraceId] = useState<string | null>(null)
+  const [closedTraceId, setClosedTraceId] = useState<string | null>(null)
+  const [traceRuns, setTraceRuns] = useState<Record<string, TraceRun>>({})
+  const [traceErrors, setTraceErrors] = useState<Record<string, string>>({})
+  const [paneRatio, setPaneRatio] = useState(() => {
+    try { return Number(sessionStorage.getItem('gmre.chat-layout.ratio')) || 0.4 } catch { return 0.4 }
+  })
+  const [paneHeights, setPaneHeights] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('gmre.chat-layout.heights') || '{}')
+      return { chat: Number(saved.chat) || 460, trace: Number(saved.trace) || 460 }
+    } catch { return { chat: 460, trace: 460 } }
+  })
+  const [areaWidth, setAreaWidth] = useState(0)
   const [error, setError] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [context, setContext] = useState<string[]>([])
-  const bottomRef = useState<HTMLDivElement | null>(null)
-  const scrollBottom = () => bottomRef[0]?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const followChatRef = useRef(true)
+  const workAreaRef = useRef<HTMLDivElement | null>(null)
+  const widthDragRef = useRef<{ startX: number; startRatio: number } | null>(null)
+  const heightDragRef = useRef<{ pane: 'chat' | 'trace'; startY: number; startHeight: number } | null>(null)
   const starters = starterPrompts
 
   const loadThreads = async () => {
@@ -481,9 +501,65 @@ function ChatPage({ token }: { token: string }) {
     return () => { mounted = false }
   }, [token, conversationId])
   useEffect(() => { const prompt = params.get('prompt'); if (prompt) { setDraft(prompt); setParams((previous) => { previous.delete('prompt'); return previous }, { replace: true }) } }, [params, setParams])
-  useEffect(() => { scrollBottom() }, [conversation?.messages?.length, busy])
+  useEffect(() => {
+    try { sessionStorage.setItem('gmre.chat-layout.ratio', String(paneRatio)) } catch { /* Optional per-tab preference. */ }
+  }, [paneRatio])
+  useEffect(() => {
+    try { sessionStorage.setItem('gmre.chat-layout.heights', JSON.stringify(paneHeights)) } catch { /* Optional per-tab preference. */ }
+  }, [paneHeights])
+  useEffect(() => {
+    const area = workAreaRef.current
+    if (!area) return
+    const measure = () => setAreaWidth(area.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(area)
+    return () => observer.disconnect()
+  }, [sidebarOpen, Boolean(openTraceId)])
+  useEffect(() => {
+    const traceIds = [...new Set([activeTraceId, openTraceId].filter((id): id is string => Boolean(id)))]
+    if (!traceIds.length) return
+    let stopped = false
+    let timer: number | undefined
+    const poll = async () => {
+      let hasActive = false
+      for (const id of traceIds) {
+        try {
+          const run = await api.getTrace(token, id)
+          if (stopped) return
+          setTraceRuns((current) => ({ ...current, [id]: run }))
+          setTraceErrors((current) => { const next = { ...current }; delete next[id]; return next })
+          if (run.status === 'queued' || run.status === 'running') hasActive = true
+          if (id === activeTraceId && !['queued', 'running'].includes(run.status)) {
+            setBusy(false)
+            setActiveTraceId(null)
+            setPendingQuestion('')
+            if (run.status === 'error' || run.status === 'interrupted') {
+              setError(run.error || 'Lượt gợi ý chưa hoàn tất. Bạn có thể thử gửi lại câu hỏi.')
+            } else if (conversationId) {
+              try {
+                const updated = await api.getConversation(token, conversationId)
+                if (!stopped) setConversation(updated)
+                void loadThreads()
+              } catch (reason) { if (!stopped) setError((reason as Error).message) }
+            }
+          }
+        } catch (reason) {
+          if (!stopped) setTraceErrors((current) => ({ ...current, [id]: (reason as Error).message }))
+          if (id === activeTraceId) hasActive = true
+        }
+      }
+      if (!stopped && hasActive) timer = window.setTimeout(poll, 1000)
+    }
+    void poll()
+    return () => { stopped = true; if (timer) window.clearTimeout(timer) }
+  }, [token, activeTraceId, openTraceId, conversationId])
+  useEffect(() => {
+    if (followChatRef.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [conversation?.messages?.length, busy, pendingQuestion, traceRuns[activeTraceId || '']?.answer])
 
   const selectConversation = (id?: string) => {
+    setPendingQuestion(''); setActiveTraceId(null); setBusy(false); setOpenTraceId(null); setClosedTraceId(null)
     setParams(id ? { conversation: id } : {}, { replace: false })
     setError('')
   }
@@ -491,21 +567,30 @@ function ChatPage({ token }: { token: string }) {
     event?.preventDefault()
     const clean = draft.trim()
     if (!clean || busy) return
-    setDraft(''); setBusy(true); setError('')
+    setDraft(''); setBusy(true); setPendingQuestion(clean); setError('')
     try {
       const active = conversation || await api.createConversation(token, clean.slice(0, 56))
       if (!conversation) {
         setConversation({ ...active, messages: [] })
         setParams({ conversation: active.id }, { replace: false })
       }
-      const result = await api.sendMessage(token, active.id, clean)
-      const at = new Date().toISOString()
-      const userMessage = { id: `local-user-${Date.now()}`, role: 'user' as const, content: clean, created_at: at }
-      const assistantMessage = { id: `local-ai-${Date.now()}`, role: 'assistant' as const, content: result.result.answer || 'Mình đã tìm thấy vài lựa chọn hợp với bạn.', meta: { items: result.result.items || [] }, created_at: at }
-      setConversation((current) => current ? { ...current, title: result.title, messages: [...(current.messages || []), userMessage, assistantMessage] } : current)
-      void loadThreads()
-    } catch (reason) { setDraft(clean); setError((reason as Error).message) }
-    finally { setBusy(false) }
+      const submitted = await api.submitConversationRun(token, active.id, clean, 'vi')
+      setActiveTraceId(submitted.trace_id)
+      setTraceRuns((current) => ({
+        ...current,
+        [submitted.trace_id]: {
+          trace_id: submitted.trace_id,
+          conversation_id: active.id,
+          question: clean,
+          status: 'queued',
+          events: [],
+        },
+      }))
+      setClosedTraceId(null)
+      followChatRef.current = true
+    } catch (reason) {
+      setDraft(clean); setPendingQuestion(''); setBusy(false); setError((reason as Error).message)
+    }
   }
   const attachContext = (value: string) => {
     setContext((current) => current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value])
@@ -516,19 +601,86 @@ function ChatPage({ token }: { token: string }) {
     catch (reason) { setError((reason as Error).message) }
   }
   const messages = conversation?.messages || []
+  const selectedTraceId = openTraceId || ''
+  const selectedTrace = selectedTraceId ? traceRuns[selectedTraceId] : undefined
+  const ratio = Math.max(0.32, Math.min(0.68, paneRatio))
+  const maxHeight = Math.max(320, window.innerHeight - 150)
+  const usableWidth = Math.max(1, areaWidth - 54)
+  const paneStyle = {
+    '--chat-pane-width': `${Math.max(320, usableWidth * ratio)}px`,
+  } as CSSProperties
+  const chatPaneHeight = `${Math.max(320, Math.min(maxHeight, paneHeights.chat))}px`
+  const tracePaneHeight = `${Math.max(320, Math.min(maxHeight, paneHeights.trace))}px`
+  const beginWidthResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (areaWidth < 700) return
+    widthDragRef.current = { startX: event.clientX, startRatio: ratio }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }
+  const moveWidthResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = widthDragRef.current
+    if (!drag || !workAreaRef.current) return
+    const available = workAreaRef.current.clientWidth - 54
+    setPaneRatio(Math.max(320 / available, Math.min(1 - 320 / available, drag.startRatio + (event.clientX - drag.startX) / available)))
+  }
+  const beginHeightResize = (pane: 'chat' | 'trace', event: ReactPointerEvent<HTMLDivElement>) => {
+    heightDragRef.current = { pane, startY: event.clientY, startHeight: paneHeights[pane] }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }
+  const moveHeightResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = heightDragRef.current
+    if (!drag) return
+    setPaneHeights((current) => ({ ...current, [drag.pane]: Math.max(320, Math.min(maxHeight, drag.startHeight + event.clientY - drag.startY)) }))
+  }
+  const openTrace = (id: string) => { setOpenTraceId(id); setClosedTraceId(null) }
+  const closeTrace = () => { setClosedTraceId(openTraceId); setOpenTraceId(null) }
+  const reopenTrace = () => { if (closedTraceId) openTrace(closedTraceId) }
   return <div className={`chat-workspace ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
     <aside className="chat-sidebar"><div className="chat-sidebar-top"><div className="chat-sidebar-title"><span className="ai-avatar"><Sparkles size={16}/></span><span><b>GMRe</b><small>Không gian trò chuyện</small></span></div><button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Thu gọn danh sách"><ArrowLeft size={16}/></button></div><button className="new-chat-button" onClick={() => selectConversation()}><Plus size={16}/> Cuộc trò chuyện mới</button><div className="sidebar-section-label">GẦN ĐÂY <span>{threads.length}</span></div><div className="thread-list">{threads.map((thread) => <div className={`thread-entry ${conversationId === thread.id ? 'current' : ''}`} key={thread.id}><button onClick={() => selectConversation(thread.id)}><MessageCircle size={15}/><span>{thread.title}</span></button><button className="thread-delete" title="Xóa trò chuyện" onClick={() => deleteThread(thread.id)}><Trash2 size={14}/></button></div>)}{!threads.length && <p className="sidebar-empty">Những cuộc trò chuyện mới sẽ xuất hiện ở đây.</p>}</div><div className="sidebar-note"><span>✳</span><p>Gợi ý càng hợp hơn khi bạn kể thêm về tâm trạng và khoảng thời gian mình có.</p></div><Link to="/history" className="sidebar-history"><Clock3 size={15}/> Xem toàn bộ lịch sử <ArrowRight size={14}/></Link></aside>
     <section className="chat-main"><div className="chat-topbar"><button className="icon-button open-sidebar" onClick={() => setSidebarOpen(true)} aria-label="Mở danh sách trò chuyện"><Menu size={18}/></button><div><span className="chat-status-dot"/> Trợ lý AI đang sẵn sàng</div><Link to="/account" className="chat-profile"><Settings2 size={16}/> Gu của bạn</Link></div>
       {error && <div className="chat-error"><InlineError message={error}/><button onClick={() => setError('')} aria-label="Đóng thông báo"><X size={16}/></button></div>}
-      <div className={`chat-scroll ${messages.length ? 'has-messages' : ''}`}>
-        {!messages.length ? <div className="chat-welcome"><span className="welcome-spark">✳</span><span className="eyebrow">TRẢI NGHIỆM GMRe AI</span><h1>Chào bạn,<br/><em>mình cùng tìm nhé.</em></h1><p>Hôm nay bạn đang có tâm trạng thế nào? Cứ kể tự nhiên — dù bạn chỉ biết mình muốn cảm thấy điều gì.</p><div className="starter-grid">{starters.map((prompt) => <button key={prompt.title} onClick={() => setDraft(prompt.text)}><span>{prompt.icon}</span><b>{prompt.title}</b><small>{prompt.text}</small><ArrowRight size={15}/></button>)}</div><div className="prompt-context"><span>Gợi ý bắt đầu:</span>{['Thư giãn', 'Dưới 2 tiếng', 'Đi cùng bạn bè'].map((item) => <button className={context.includes(item) ? 'selected' : ''} onClick={() => attachContext(item)} key={item}>{item}</button>)}</div></div> : <div className="message-stream">{messages.map((message) => <ChatMessage key={message.id} message={message}/>)}{busy && <div className="typing-row"><span className="ai-avatar"><Sparkles size={14}/></span><div><span className="typing-dots"><i/><i/><i/></span><small>Đang tìm điều hợp gu bạn…</small></div></div>}<div ref={(node) => { bottomRef[1](node) }}/></div>}
+      <div ref={workAreaRef} className={`chat-workarea ${openTraceId ? 'has-trace' : ''} ${areaWidth >= 700 ? 'wide-trace' : ''}`} style={paneStyle}>
+        <section className="chat-pane" style={{ height: chatPaneHeight }}>
+          {!openTraceId && closedTraceId && <button className="reopen-trace-button" onClick={reopenTrace}><Settings2 size={14}/> Mở lại chi tiết</button>}
+          <div ref={scrollRef} className={`chat-scroll ${messages.length || pendingQuestion ? 'has-messages' : ''}`} onScroll={(event) => {
+            const element = event.currentTarget
+            followChatRef.current = element.scrollHeight - element.clientHeight - element.scrollTop <= 48
+          }}>
+            {!messages.length && !pendingQuestion ? <div className="chat-welcome"><span className="welcome-spark">✳</span><span className="eyebrow">TRẢI NGHIỆM GMRe AI</span><h1>Chào bạn,<br/><em>mình cùng tìm nhé.</em></h1><p>Hôm nay bạn đang có tâm trạng thế nào? Cứ kể tự nhiên — dù bạn chỉ biết mình muốn cảm thấy điều gì.</p><div className="starter-grid">{starters.map((prompt) => <button key={prompt.title} onClick={() => setDraft(prompt.text)}><span>{prompt.icon}</span><b>{prompt.title}</b><small>{prompt.text}</small><ArrowRight size={15}/></button>)}</div><div className="prompt-context"><span>Gợi ý bắt đầu:</span>{['Thư giãn', 'Dưới 2 tiếng', 'Đi cùng bạn bè'].map((item) => <button className={context.includes(item) ? 'selected' : ''} onClick={() => attachContext(item)} key={item}>{item}</button>)}</div></div> : <div className="message-stream">{messages.map((message, index) => {
+              const next = messages[index + 1]
+              const traceId = message.role === 'user' && next?.role === 'assistant' ? String(next.meta?.trace_id || '') : ''
+              return <ChatMessage key={message.id} message={message} traceId={traceId} onOpenTrace={openTrace}/>
+            })}
+              {pendingQuestion && <ChatMessage message={{ id: `pending-${activeTraceId || 'question'}`, role: 'user', content: pendingQuestion }} traceId={activeTraceId || ''} onOpenTrace={openTrace}/>}
+              {busy && <div className="typing-row"><span className="ai-avatar"><Sparkles size={14}/></span><div><span className="typing-dots"><i/><i/><i/></span><small>Đang tìm điều hợp gu bạn…</small></div></div>}
+              <div ref={bottomRef}/>
+            </div>}
+          </div>
+          <div className="composer-wrap"><div className="composer-context">{['☁ Tâm trạng', '◷ Thời lượng', '♡ Đi cùng ai'].map((item) => <button key={item} onClick={() => attachContext(item.split(' ').slice(1).join(' '))}>{item}</button>)}</div><form className="chat-composer" onSubmit={send}><textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Mình có thể giúp bạn tìm điều gì?" aria-label="Tin nhắn cho AI"/><button className="send-button" disabled={!draft.trim() || busy} aria-label="Gửi tin nhắn">{busy ? <span className="spinner spinner-white"/> : <Send size={17}/>}</button></form><small className="composer-hint">Enter để gửi · Shift + Enter để xuống dòng · AI tập trung vào gợi ý phim và game</small></div>
+          <div className="pane-height-handle" role="separator" tabIndex={0} aria-label="Đổi chiều cao khung chat" aria-orientation="horizontal" onPointerDown={(event) => beginHeightResize('chat', event)} onPointerMove={moveHeightResize} onPointerUp={() => { heightDragRef.current = null }} onPointerCancel={() => { heightDragRef.current = null }} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setPaneHeights((current) => ({ ...current, chat: Math.max(320, Math.min(maxHeight, current.chat + (event.key === 'ArrowUp' ? -16 : 16))) })) } }}/>
+        </section>
+        {openTraceId && <>
+          <div className="pane-width-handle" role="separator" tabIndex={0} aria-label="Đổi chiều rộng khung chat và truy vấn" aria-orientation="vertical" aria-valuenow={Math.round(ratio * 100)} onPointerDown={beginWidthResize} onPointerMove={moveWidthResize} onPointerUp={() => { widthDragRef.current = null }} onPointerCancel={() => { widthDragRef.current = null }} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPaneRatio((current) => Math.max(0.32, Math.min(0.68, current + (event.key === 'ArrowLeft' ? -0.02 : 0.02)))) } }}/>
+          <section className="trace-pane" style={{ height: tracePaneHeight }}>
+            <div className="trace-pane-header"><div><span className="eyebrow">THEO DÕI TRỰC TIẾP</span><h2>Chi tiết truy vấn</h2></div><button className="button button-outline trace-close" onClick={closeTrace}>Đóng chi tiết</button></div>
+            <div className="trace-scroll">
+              {traceErrors[openTraceId] && <InlineError message={traceErrors[openTraceId]}/>}
+              {!selectedTrace ? <div className="trace-loading"><span className="spinner"/> Đang tải chi tiết truy vấn…</div> : <TraceDetails run={selectedTrace}/>}
+            </div>
+            <div className="pane-height-handle" role="separator" tabIndex={0} aria-label="Đổi chiều cao khung truy vấn" aria-orientation="horizontal" onPointerDown={(event) => beginHeightResize('trace', event)} onPointerMove={moveHeightResize} onPointerUp={() => { heightDragRef.current = null }} onPointerCancel={() => { heightDragRef.current = null }} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setPaneHeights((current) => ({ ...current, trace: Math.max(320, Math.min(maxHeight, current.trace + (event.key === 'ArrowUp' ? -16 : 16))) })) }}/>
+          </section>
+        </>}
       </div>
-      <div className="composer-wrap"><div className="composer-context">{['☁ Tâm trạng', '◷ Thời lượng', '♡ Đi cùng ai'].map((item) => <button key={item} onClick={() => attachContext(item.split(' ').slice(1).join(' '))}>{item}</button>)}</div><form className="chat-composer" onSubmit={send}><textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Mình có thể giúp bạn tìm điều gì?" aria-label="Tin nhắn cho AI"/><button className="send-button" disabled={!draft.trim() || busy} aria-label="Gửi tin nhắn">{busy ? <span className="spinner spinner-white"/> : <Send size={17}/>}</button></form><small className="composer-hint">Enter để gửi · Shift + Enter để xuống dòng · AI tập trung vào gợi ý phim và game</small></div>
     </section>
   </div>
 }
 
-function ChatMessage({ message }: { message: { id: string; role: 'user' | 'assistant'; content: string; meta?: { items?: ApiRecommendation[] } | null } }) {
+function ChatMessage({ message, traceId, onOpenTrace }: {
+  message: { id: string; role: 'user' | 'assistant'; content: string; meta?: { items?: ApiRecommendation[] } | null }
+  traceId?: string
+  onOpenTrace?: (id: string) => void
+}) {
   const isUser = message.role === 'user'
   const items = (message.meta?.items || []).map((item, index) => recommendationToMedia(item as Record<string, unknown>, index))
   const { toggleSaved, saved } = useApp()
@@ -537,7 +689,35 @@ function ChatMessage({ message }: { message: { id: string; role: 'user' | 'assis
     sessionStorage.setItem(`entdec.web.item.${item.id}`, JSON.stringify(item))
     navigate(`/item/${encodeURIComponent(item.id)}`, { state: { item } })
   }
-  return <div className={`chat-message ${isUser ? 'from-user' : 'from-ai'}`}>{!isUser && <span className="ai-avatar"><Sparkles size={15}/></span>}<div className="message-body"><div className="message-bubble">{message.content}</div>{items.length > 0 && <div className="chat-recommendations"><span className="eyebrow">MẤY GỢI Ý ĐẦU TIÊN</span>{items.map((item) => <article className="chat-rec-card" key={item.id}><button onClick={() => openItem(item)} className="chat-rec-art" aria-label={`Xem ${item.title}`}><ChatPoster item={item}/></button><div className="chat-rec-info"><span className="eyebrow">{item.eyebrow}</span><button className="chat-rec-title" onClick={() => openItem(item)}><b>{item.title}</b></button><small>{item.year || item.duration} · {item.match}% hợp gu</small><p>{item.why}</p></div><button className={`icon-button ${saved.some((entry) => entry.id === item.id) ? 'on' : ''}`} onClick={() => toggleSaved(item)} title="Lưu vào danh sách"><Bookmark size={16}/></button></article>)}</div>}</div></div>
+  return <div className={`chat-message ${isUser ? 'from-user' : 'from-ai'}`}>{!isUser && <span className="ai-avatar"><Sparkles size={15}/></span>}<div className="message-body"><div className="message-bubble">{message.content}</div>{isUser && traceId && onOpenTrace && <button className="message-trace-button" onClick={() => onOpenTrace(traceId)}><Settings2 size={13}/> Mở rộng chi tiết truy vấn</button>}{items.length > 0 && <div className="chat-recommendations"><span className="eyebrow">MẤY GỢI Ý ĐẦU TIÊN</span>{items.map((item) => <article className="chat-rec-card" key={item.id}><button onClick={() => openItem(item)} className="chat-rec-art" aria-label={`Xem ${item.title}`}><ChatPoster item={item}/></button><div className="chat-rec-info"><span className="eyebrow">{item.eyebrow}</span><button className="chat-rec-title" onClick={() => openItem(item)}><b>{item.title}</b></button><small>{item.year || item.duration} · {item.match}% hợp gu</small><p>{item.why}</p></div><button className={`icon-button ${saved.some((entry) => entry.id === item.id) ? 'on' : ''}`} onClick={() => toggleSaved(item)} title="Lưu vào danh sách"><Bookmark size={16}/></button></article>)}</div>}</div></div>
+}
+
+const traceStageLabels: Record<string, string> = {
+  queue: 'Đang chờ', start: 'Tiếp nhận', embed: 'Embedding câu hỏi', session: 'Bộ nhớ hội thoại',
+  intent: 'Phân tích ý định', resolve: 'Chuẩn hoá tham chiếu', retrieval: 'Truy xuất ứng viên',
+  rerank: 'Xếp hạng lại', evidence: 'Tạo bằng chứng', answer: 'Sinh câu trả lời',
+  answer_line: 'Dòng trả lời', persist: 'Lưu kết quả', done: 'Kết thúc',
+}
+
+function TraceDetails({ run }: { run: TraceRun }) {
+  const statusLabels: Record<string, string> = {
+    queued: 'Đang chờ', running: 'Đang xử lý', complete: 'Hoàn tất', partial: 'Hoàn tất một phần',
+    error: 'Lỗi', interrupted: 'Bị gián đoạn',
+  }
+  const events = run.events || []
+  const stages = new Map<string, TraceRun['events'][number]>()
+  for (const event of events) if (event.stage !== 'answer_line') stages.set(event.stage, event)
+  return <div className="trace-detail-content">
+    <div className="trace-question"><span className="eyebrow">CÂU HỎI</span><p>{run.question}</p></div>
+    <div className="trace-status-row"><span className={`trace-status status-${run.status}`}>{statusLabels[run.status] || run.status}</span><span>{String(run.trace_id)}</span></div>
+    <div className="trace-stage-list">
+      {[...stages.entries()].map(([stage, event]) => <div className="trace-stage" key={`${event.seq}-${stage}`}><span className={`trace-stage-mark stage-${event.status}`}/><div><b>{traceStageLabels[stage] || stage}</b><small>{event.status}{typeof event.duration_ms === 'number' ? ` · ${(event.duration_ms / 1000).toFixed(1)} giây` : ''}</small></div></div>)}
+      {stages.size === 0 && <p className="trace-muted">Đang chờ worker bắt đầu xử lý…</p>}
+    </div>
+    {run.answer && <div className="trace-answer"><span className="eyebrow">CÂU TRẢ LỜI ĐANG TẠO</span><p>{run.answer}</p></div>}
+    {run.error && <InlineError message={run.error}/>}
+    {events.length > 0 && <details className="trace-events"><summary>Sự kiện truy vấn ({events.length})</summary><ol>{events.map((event) => <li key={event.seq}><b>{traceStageLabels[event.stage] || event.stage}</b><span>{event.status}</span>{event.text && <p>{event.text}</p>}</li>)}</ol></details>}
+  </div>
 }
 
 function ChatPoster({ item }: { item: MediaItem }) {

@@ -18,6 +18,7 @@ ACTIVE = {"queued", "running"}
 PROCESS = uuid.uuid4().hex
 POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chat")
 LOCK = threading.RLock()
+LLM_LOCK = threading.Lock()
 INITIALIZED = set()
 
 
@@ -80,7 +81,7 @@ class QueryRuns:
                 .order_by(QueryEvent.seq)).all()]
             return payload
 
-    def submit(self, user_id, conversation_id, question, pipeline):
+    def submit(self, user_id, conversation_id, question, pipeline, *, language=None):
         self.recover()
         accepted = time.perf_counter()
         with LOCK:
@@ -94,6 +95,7 @@ class QueryRuns:
                            conversation_id=conversation_id, question=question, status="queued",
                            profile=pipeline.cfg.profile.name, model=pipeline.client.gen_model,
                            embedding_model=pipeline.client.embed_model,
+                           language=language,
                            created_at=datetime.now(UTC).isoformat(), answer="", metrics={},
                            configuration={k: pipeline.cfg.get("llm." + k) for k in
                                           ("temperature", "num_ctx", "max_tokens_answer", "retrieval_k", "rerank_k")})
@@ -138,9 +140,11 @@ class QueryRuns:
             dict(stage="answer_line", status="ok", text=text))), OUTCOME.set(None)]
         try:
             event(dict(stage="start", status="running"))
-            turn = self.conversations.run_turn(payload["user_id"], payload["conversation_id"],
-                                              payload["question"], pipeline,
-                                              trace_id=payload["trace_id"])
+            with LLM_LOCK:
+                turn = self.conversations.run_turn(payload["user_id"], payload["conversation_id"],
+                                                  payload["question"], pipeline,
+                                                  language=payload.get("language"),
+                                                  trace_id=payload["trace_id"])
             result = turn["result"]
             payload.update(answer=result["answer"], result=result,
                            domains=result.get("domains_queried", result.get("domains", [])),

@@ -29,10 +29,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from entdec.auth.conversations import ConversationNotFound
+from entdec.auth.query_runs import LLM_LOCK as _LLM_LOCK
 from entdec.chatbot.session import ChatSession
-
-_LLM_LOCK = threading.Lock()
-
 
 class SessionStore:
     """Bounded in-memory session store with sliding TTL."""
@@ -190,6 +188,10 @@ class ChatTurnOut(BaseModel):
     result: dict[str, Any]
 
 
+class TraceSubmitOut(BaseModel):
+    trace_id: str
+
+
 class AccountStateIn(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -206,6 +208,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
     from entdec.auth.conversations import ConversationService
     from entdec.auth.database import init_db, make_engine, make_session_factory
     from entdec.auth.models import AccountState
+    from entdec.auth.query_runs import QueryRuns, statistics
     from entdec.auth.service import AuthError, AuthService
     from entdec.config import get_config
     from entdec.graph.neo4j_client import Neo4jClient
@@ -501,7 +504,20 @@ def create_app(cfg=None, *, no_graph: bool = False):
                 language=body.language,
             )
 
-    from entdec.auth.query_runs import QueryRuns, statistics
+    @app.post("/conversations/{conversation_id}/runs", response_model=TraceSubmitOut, status_code=202)
+    def submit_conversation_run(
+        conversation_id: str,
+        body: ChatTurnIn,
+        user: dict = Depends(current_user),  # noqa: B008
+    ) -> dict:
+        if not body.message.strip():
+            raise HTTPException(status_code=400, detail="message must not be empty")
+        app.state.conversations.get(user["id"], conversation_id)
+        pipeline = pipeline_for_request()
+        trace_id = QueryRuns(app.state.conversations).submit(
+            user["id"], conversation_id, body.message, pipeline, language=body.language
+        )
+        return {"trace_id": trace_id}
 
     def trace_filters(status=None, profile=None, conversation_id=None, domain=None,
                       answer_source=None, since=None, until=None):
