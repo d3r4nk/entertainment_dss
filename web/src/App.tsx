@@ -3,7 +3,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, use
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, Bookmark, Check, ChevronDown, Clock3, Compass,
   CircleCheck, Heart, Library, LogOut, Menu, MessageCircle, Plus, Search, Send, Settings2,
-  ShieldCheck, Sparkles, Star, Trash2, UserRound, X,
+  ShieldCheck, Sparkles, Star, Sun, Moon, Trash2, UserRound, X,
 } from 'lucide-react'
 import { api, ApiError, DEMO_MODE, DEMO_TOKEN, isDemoToken } from './api'
 import { catalogue, categories, itemById, recommendationToMedia, starterPrompts, vibes } from './data'
@@ -32,6 +32,7 @@ function readSaved(user?: User | null): MediaItem[] {
 }
 
 function App() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => localStorage.getItem('entdec.web.theme') === 'light' ? 'light' : 'dark')
   const [token, setToken] = useState(() => sessionStorage.getItem(tokenKey) || '')
   const [user, setUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(!token)
@@ -48,6 +49,10 @@ function App() {
   const syncSnapshot = useRef<Record<string, unknown>>({})
   const location = useLocation()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    localStorage.setItem('entdec.web.theme', theme)
+  }, [theme])
 
   useEffect(() => {
     if (!token) { setUser(null); setAuthReady(true); setAccountDataReady(true); setAccountSyncEnabled(false); return }
@@ -163,8 +168,8 @@ function App() {
   const value: AppContextValue = { token, user, authReady, taste, setTaste, saved, toggleSaved, completedIds, toggleCompleted, ratings, setItemRating, pinnedIds, togglePinned, signIn, signOut }
 
   return <AppContext.Provider value={value}>
-    <div className="app-shell">
-      <SiteHeader user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen} onSignOut={signOut} />
+    <div className="app-shell" data-theme={theme}>
+      <SiteHeader user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen} onSignOut={signOut} theme={theme} onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} />
       {accountSyncError && <div className="wrap" style={{ paddingTop: 12 }}><InlineError message={accountSyncError}/></div>}
       <main onClick={() => menuOpen && setMenuOpen(false)}>
         {!authReady ? <div className="page-loading"><span className="spinner" /> Đang mở GMRe…</div> : <Routes>
@@ -202,7 +207,7 @@ function PrivateRoute({ user, children }: { user: User | null; children: ReactNo
   return <>{children}</>
 }
 
-function SiteHeader({ user, menuOpen, setMenuOpen, onSignOut }: { user: User | null; menuOpen: boolean; setMenuOpen: (open: boolean) => void; onSignOut: () => void }) {
+function SiteHeader({ user, menuOpen, setMenuOpen, onSignOut, theme, onToggleTheme }: { user: User | null; menuOpen: boolean; setMenuOpen: (open: boolean) => void; onSignOut: () => void; theme: 'dark' | 'light'; onToggleTheme: () => void }) {
   const links = user
     ? [{ to: '/explore', label: 'Khám phá', icon: <Compass size={16} /> }, { to: '/chatbot', label: 'Chatbot AI', icon: <Sparkles size={16} /> }, { to: '/saved', label: 'Đã lưu', icon: <Bookmark size={16} /> }, { to: '/traces', label: 'Trace AI', icon: <Settings2 size={16} /> }]
     : [{ to: '/explore', label: 'Khám phá', icon: <Compass size={16} /> }, { to: '/chatbot', label: 'Chatbot AI', icon: <Sparkles size={16} /> }, { to: '/#collections', label: 'Bộ sưu tập', icon: <Library size={16} /> }]
@@ -210,6 +215,7 @@ function SiteHeader({ user, menuOpen, setMenuOpen, onSignOut }: { user: User | n
     <div className="nav-inner">
       <Link to="/" className="brand" aria-label="GMRe — Trang chủ"><span className="brand-name">GMRe</span><small className="brand-tagline">KHÁM PHÁ GIẢI TRÍ HỢP GU</small></Link>
       <button className="mobile-menu" aria-label={menuOpen ? 'Đóng điều hướng' : 'Mở điều hướng'} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
+      <button className="theme-toggle" type="button" onClick={onToggleTheme} aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'} title={theme === 'dark' ? 'Giao diện sáng' : 'Giao diện tối'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}<span>{theme === 'dark' ? 'Sáng' : 'Tối'}</span></button>
       <nav className={`main-nav ${menuOpen ? 'open' : ''}`} aria-label="Điều hướng chính">
         <NavLink to="/" end>Trang chủ</NavLink>
         {links.map((link) => <NavLink to={link.to} key={link.to}>{link.label}</NavLink>)}
@@ -348,7 +354,7 @@ function ItemPage({ onSave, saved }: { onSave: (item: MediaItem) => void; saved:
   if (!item) return <div className="page-wrap wrap"><EmptyState icon={<Compass/>} title="Chưa tìm thấy gợi ý này" text="Có thể nội dung đã được cập nhật. Mình cùng khám phá lựa chọn khác nhé." action={<Link className="button button-primary" to="/explore">Đi khám phá <ArrowRight size={16}/></Link>}/></div>
   const similar = catalogue.filter((entry) => entry.id !== item.id && (entry.kind === item.kind || entry.mood === item.mood)).slice(0, 3)
   const saveItem = () => { if (!user) { navigate('/login', { state: { from: location.pathname } }); return } onSave(item) }
-  return <div className="page-wrap wrap"><Link className="back-link" to="/explore"><ArrowLeft size={16}/> Quay lại khám phá</Link><div className="detail-layout"><div className="detail-art" style={{ backgroundImage: `linear-gradient(180deg,rgba(17,18,22,.02),rgba(17,18,22,.22)),url("${item.image}")` }}><span>{item.emoji}</span></div><div className="detail-copy"><span className="eyebrow">{item.eyebrow}</span><h1>{item.title}</h1><div className="detail-meta"><span>{item.year || item.duration}</span><i/><span>{item.platform || item.mood}</span></div><div className="detail-match"><span className="match-ring">{item.match}<small>%</small></span><span><b>Mức độ hợp gu</b><small>Gợi ý theo tâm trạng bạn chọn</small></span></div><p>{item.description}</p><div className="detail-why"><span>✳</span><div><b>Vì sao gợi ý này hợp với bạn</b><p>{item.why}</p></div></div><div className="tag-list detail-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><button className={`button ${saved.some((entry) => entry.id === item.id) ? 'button-outline' : 'button-primary'}`} onClick={saveItem}><Bookmark size={17}/>{saved.some((entry) => entry.id === item.id) ? 'Đã lưu vào danh sách' : 'Lưu vào danh sách'}</button></div></div><div className="similar-section"><SectionHeading kicker="NẾU BẠN THÍCH ĐIỀU NÀY" title="Có thể bạn cũng sẽ thích" sub="Thêm vài lựa chọn cùng mood để bạn cân nhắc."/><div className="media-grid">{similar.map((entry) => <MediaCard key={entry.id} item={entry}/>)}</div></div></div>
+  return <div className="page-wrap wrap"><Link className="back-link" to="/explore"><ArrowLeft size={16}/> Quay lại khám phá</Link><div className="detail-layout"><div className="detail-art" style={{ backgroundImage: `linear-gradient(180deg,rgba(17,18,22,.02),rgba(17,18,22,.22)),url("${item.image}")` }}></div><div className="detail-copy"><span className="eyebrow">{item.eyebrow}</span><h1>{item.title}</h1><div className="detail-meta"><span>{item.year || item.duration}</span><i/><span>{item.platform || item.mood}</span></div><div className="detail-match"><span className="match-ring">{item.match}<small>%</small></span><span><b>Mức độ hợp gu</b><small>Gợi ý theo tâm trạng bạn chọn</small></span></div><p>{item.description}</p><div className="detail-why"><span>✳</span><div><b>Vì sao gợi ý này hợp với bạn</b><p>{item.why}</p></div></div><div className="tag-list detail-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><button className={`button ${saved.some((entry) => entry.id === item.id) ? 'button-outline' : 'button-primary'}`} onClick={saveItem}><Bookmark size={17}/>{saved.some((entry) => entry.id === item.id) ? 'Đã lưu vào danh sách' : 'Lưu vào danh sách'}</button></div></div><div className="similar-section"><SectionHeading kicker="NẾU BẠN THÍCH ĐIỀU NÀY" title="Có thể bạn cũng sẽ thích" sub="Thêm vài lựa chọn cùng mood để bạn cân nhắc."/><div className="media-grid">{similar.map((entry) => <MediaCard key={entry.id} item={entry}/>)}</div></div></div>
 }
 
 function SavedPage({ items, onSave }: { items: MediaItem[]; onSave: (item: MediaItem) => void }) {
