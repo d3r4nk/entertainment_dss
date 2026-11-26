@@ -116,3 +116,7 @@
   .trace-pane-header{min-height:64px;padding:10px 12px}
   .trace-scroll{padding:11px}
 }
+.home-results-count{margin:12px 0;color:#85828b;font-size:12px}
+.catalogue-pagination{display:flex;align-items:center;justify-content:center;gap:16px;margin:28px 0 12px;color:#73717b;font-size:12px}
+.catalogue-pagination .button{min-height:36px;padding:0 14px}
+.catalogue-pagination .button:disabled{opacity:.45;cursor:not-allowed}

@@ -9,6 +9,7 @@ export type MediaItem = {
   duration: string
   match: number
   description: string
+  shortDescription?: string
   why: string
   emoji: string
   image: string
