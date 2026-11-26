@@ -54,7 +54,7 @@ def trace_button(st, conversation_id, trace_id, *, key, in_fragment=False):
         st.session_state["open_trace"] = (conversation_id, trace_id)
         st.session_state.pop("closed_trace", None)
 
-    clicked = st.button("Xem chi tiết truy vấn", key=key, on_click=select_trace)
+    clicked = st.button("Mở rộng chi tiết truy vấn", key=key, on_click=select_trace)
     if clicked and in_fragment:
         st.rerun()
 
@@ -113,17 +113,20 @@ def live_chat(st, runs, user_id, conversation_id):
             if st.session_state.pop(key, False):
                 st.rerun()
             if latest["status"] in {"error", "interrupted"}:
-                render_progress(st, runs.get(user_id, latest["trace_id"]))
-                trace_button(st, conversation_id, latest["trace_id"],
-                             key=f"failed_trace_{latest['trace_id']}", in_fragment=True)
+                with st.chat_message("user"):
+                    st.write(latest["question"])
+                    trace_button(st, conversation_id, latest["trace_id"],
+                                 key=f"failed_trace_{latest['trace_id']}", in_fragment=True)
+                with st.chat_message("assistant"):
+                    render_progress(st, runs.get(user_id, latest["trace_id"]))
             return
         st.session_state[key] = True
         with st.chat_message("user"):
             st.write(latest["question"])
-        with st.chat_message("assistant"):
-            render_progress(st, runs.get(user_id, latest["trace_id"]))
             trace_button(st, conversation_id, latest["trace_id"],
                          key=f"live_trace_{latest['trace_id']}", in_fragment=True)
+        with st.chat_message("assistant"):
+            render_progress(st, runs.get(user_id, latest["trace_id"]))
     poll()
 
 

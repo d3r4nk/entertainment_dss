@@ -59,7 +59,7 @@ khi không sử dụng Neo4j, nhưng vẫn cần dữ liệu và artefact local.
 4. Mỗi dòng trả lời xuất hiện sau khi hoàn thành và đối chiếu với ứng viên.
    Đây là streaming theo dòng, không phải hiệu ứng gõ chữ sau khi đã sinh xong.
 5. Khi hoàn tất, câu trả lời và lịch sử được giữ lại; khung tiến độ có thể thu gọn.
-6. Nhấn **Xem chi tiết truy vấn** dưới lượt đang chạy hoặc câu trả lời đã lưu.
+6. Nhấn **Mở rộng chi tiết truy vấn** ngay dưới câu hỏi của bạn, dù lượt đang chạy hay đã hoàn tất.
    Chi tiết của lượt đó mở trong cùng phiên đăng nhập và tự cập nhật khi lượt còn chạy.
 
 ### Điều chỉnh khung Chat và Chi tiết truy vấn
