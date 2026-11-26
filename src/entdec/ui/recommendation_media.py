@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from PIL import Image, ImageOps
@@ -29,9 +29,10 @@ _STEAM_IMAGE_VARIANTS = (
 _POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="card-media")
 _CACHE_SIZE = 128
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024
-_CACHE: OrderedDict[tuple[str, int, SecretStr | None], tuple[float, Future[bytes | None]]] = (
-    OrderedDict()
-)
+_MAX_POSTER_BYTES = 5 * 1024 * 1024
+_CACHE: OrderedDict[
+    tuple[str, str, int, SecretStr | None], tuple[float, Future[bytes | None]]
+] = OrderedDict()
 _LOCK = Lock()
 
 
@@ -143,10 +144,61 @@ def _load_thumbnail(domain: str, item_id: int, token: SecretStr | None) -> bytes
         return None
 
 
-def _request_thumbnail(
-    domain: str, item_id: int, token: SecretStr | None = None
+def _load_poster(domain: str, item_id: int, token: SecretStr | None) -> bytes | None:
+    try:
+        with httpx.Client(timeout=3.0, follow_redirects=True) as client:
+            if domain == "movie":
+                url = _image_url(client, domain, item_id, token)
+                if url is None:
+                    return None
+                urls = (url,)
+            else:
+                variants = ("library_600x900.jpg", *_STEAM_IMAGE_VARIANTS)
+                urls = tuple(
+                    f"https://{host}/steam/apps/{item_id}/{variant}"
+                    for variant in dict.fromkeys(variants)
+                    for host in _STEAM_IMAGE_HOSTS
+                )
+            for url in urls:
+                try:
+                    content = BytesIO()
+                    with client.stream("GET", url) as response:
+                        response.raise_for_status()
+                        for chunk in response.iter_bytes():
+                            if content.tell() + len(chunk) > _MAX_POSTER_BYTES:
+                                content = None
+                                break
+                            content.write(chunk)
+                    if content is None:
+                        continue
+                    content.seek(0)
+                    with Image.open(content) as image:
+                        if image.width * image.height > 8_000_000:
+                            continue
+                        poster = ImageOps.exif_transpose(image).convert("RGB")
+                        result = BytesIO()
+                        poster.save(result, format="JPEG", quality=88, optimize=True)
+                        return result.getvalue()
+                except (
+                    httpx.HTTPError, ValueError, OSError, SyntaxError,
+                    Image.DecompressionBombError,
+                ):
+                    continue
+            return None
+    except (
+        httpx.HTTPError, ValueError, AttributeError, OSError, SyntaxError,
+        Image.DecompressionBombError,
+    ):
+        return None
+
+
+def _request_image(
+    purpose: Literal["poster", "thumbnail"],
+    domain: str,
+    item_id: int,
+    token: SecretStr | None = None,
 ) -> Future[bytes | None] | None:
-    key = (domain, item_id, token)
+    key = (purpose, domain, item_id, token)
     now = monotonic()
     with _LOCK:
         cached = _CACHE.get(key)
@@ -162,9 +214,16 @@ def _request_thumbnail(
             if oldest_done is None:
                 return None
             del _CACHE[oldest_done]
-        image = _POOL.submit(_load_thumbnail, domain, item_id, token)
+        loader = _load_poster if purpose == "poster" else _load_thumbnail
+        image = _POOL.submit(loader, domain, item_id, token)
         _CACHE[key] = (now, image)
         return image
+
+
+def _request_thumbnail(
+    domain: str, item_id: int, token: SecretStr | None = None
+) -> Future[bytes | None] | None:
+    return _request_image("thumbnail", domain, item_id, token)
 
 
 class RecommendationMedia:
@@ -193,3 +252,21 @@ class RecommendationMedia:
             return CardMedia(None, None)
         image = _request_thumbnail("movie", tmdb_id, self.tmdb_token) if self.tmdb_token else None
         return CardMedia("Xem trên TMDB", f"https://www.themoviedb.org/movie/{tmdb_id}", image)
+
+    def poster_for(self, item: dict[str, Any]) -> Future[bytes | None] | None:
+        domain = item.get("domain")
+        item_id = _positive_id(item.get("id"))
+        if domain not in ("movie", "game") or item_id is None:
+            return None
+        if domain == "game":
+            return _request_image("poster", "game", item_id)
+        if not self.tmdb_token:
+            return None
+        try:
+            modified = self.links_path.stat().st_mtime_ns
+        except OSError:
+            return None
+        tmdb_id = _movie_ids(self.links_path, modified).get(item_id)
+        if tmdb_id is None:
+            return None
+        return _request_image("poster", "movie", tmdb_id, self.tmdb_token)

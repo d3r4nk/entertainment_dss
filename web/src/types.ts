@@ -12,6 +12,7 @@ export type MediaItem = {
   why: string
   emoji: string
   image: string
+  fallbackImage?: string
   tags: string[]
   year?: string
   platform?: string

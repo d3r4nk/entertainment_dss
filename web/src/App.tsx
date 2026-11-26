@@ -270,7 +270,7 @@ function Home({ onSave, saved }: { onSave: (item: MediaItem) => void; saved: Med
     </div></section>
 
     <section id="collections" className="conversation-section"><div className="wrap conversation-wrap"><div className="conversation-copy"><div className="eyebrow eyebrow-light"><span className="eyebrow-dot" /> ĐỪNG CHỌN MỘT MÌNH</div><h2>Một cuộc trò chuyện<br />có thể mở ra <em>cả tối vui.</em></h2><p>Nói với AI như nói với một người bạn hiểu gu của bạn. Càng trò chuyện, gợi ý càng gần với điều bạn đang tìm.</p><button className="button button-white" onClick={() => openPrompt('Tối nay mình muốn một bộ phim nhẹ nhàng để xem cùng bạn, khoảng 2 tiếng.')}>Thử trò chuyện ngay <ArrowRight size={16}/></button><div className="conversation-stat"><strong>Không cần biết tên thể loại.</strong><span>Chỉ cần bắt đầu bằng cảm giác của bạn.</span></div></div>
-      <div className="chat-preview"><div className="preview-head"><span className="ai-avatar"><Sparkles size={16}/></span><span><b>GMRe AI</b><small><i/> Đang lắng nghe bạn</small></span><span className="preview-more">•••</span></div><div className="preview-messages"><div className="bubble bubble-user">Tối nay mình muốn xem gì đó nhẹ nhàng, nhưng vẫn có chút để nghĩ về.</div><div className="bubble bubble-ai"><span className="bubble-spark">✳</span><div>Mình nghĩ một câu chuyện ấm áp sẽ hợp với tâm trạng của bạn. Đây là lựa chọn đầu tiên nhé:</div><div className="mini-recommend"><div className="mini-cover" style={{ backgroundImage: `url(${catalogue[3].image})` }} /><div><small>PHIM · ĐỜI THƯỜNG</small><strong>Perfect Days</strong><span>Nhẹ nhàng, sâu lắng · 2 giờ 4 phút</span></div><span className="mini-score">91%</span></div><div className="why-note">✦ Vì bạn muốn thư giãn mà vẫn có điều đọng lại.</div></div></div><div className="preview-composer"><span>Kể thêm một chút nhé…</span><button aria-label="Gửi"><ArrowRight size={16}/></button></div></div>
+      <div className="chat-preview"><div className="preview-head"><span className="ai-avatar"><Sparkles size={16}/></span><span><b>GMRe AI</b><small><i/> Đang lắng nghe bạn</small></span><span className="preview-more">•••</span></div><div className="preview-messages"><div className="bubble bubble-user">Tối nay mình muốn xem gì đó nhẹ nhàng, nhưng vẫn có chút để nghĩ về.</div><div className="bubble bubble-ai"><span className="bubble-spark">✳</span><div>Mình nghĩ một câu chuyện ấm áp sẽ hợp với tâm trạng của bạn. Đây là lựa chọn đầu tiên nhé:</div><div className="mini-recommend"><div className="mini-cover" style={{ backgroundImage: `url(${catalogue[2].image})` }} /><div><small>PHIM · ĐỜI THƯỜNG</small><strong>Perfect Days</strong><span>Nhẹ nhàng, sâu lắng · 2 giờ 4 phút</span></div><span className="mini-score">91%</span></div><div className="why-note">✦ Vì bạn muốn thư giãn mà vẫn có điều đọng lại.</div></div></div><div className="preview-composer"><span>Kể thêm một chút nhé…</span><button aria-label="Gửi"><ArrowRight size={16}/></button></div></div>
     </div></section>
 
     <section className="section quote-section"><div className="wrap quote-wrap"><div className="quote-mark">“</div><div className="quote-main"><span className="eyebrow">NHỮNG TRẢI NGHIỆM GMRe DỄ THƯƠNG HƠN</span><blockquote>“Mình thường mất cả buổi chỉ để chọn phim. Giờ thì chỉ cần kể đang có tâm trạng gì — và tối nào cũng tìm được thứ hợp với mình.”</blockquote><div className="quote-person"><span className="quote-avatar">M</span><span><b>Minh Anh</b><small>Người thích những tối thật chậm</small></span><span className="quote-stars">★★★★★</span></div></div><div className="quote-side"><div className="quote-small"><span>🎮</span><p>“Tụi mình tìm được game co-op để chơi cả tối.”</p><small>— Quang, 26 tuổi</small></div><div className="quote-small"><span>🎬</span><p>“Chọn phim nhanh hơn, đúng tâm trạng hơn.”</p><small>— Linh & Nam</small></div></div></div></section>
@@ -537,7 +537,26 @@ function ChatMessage({ message }: { message: { id: string; role: 'user' | 'assis
     sessionStorage.setItem(`entdec.web.item.${item.id}`, JSON.stringify(item))
     navigate(`/item/${encodeURIComponent(item.id)}`, { state: { item } })
   }
-  return <div className={`chat-message ${isUser ? 'from-user' : 'from-ai'}`}>{!isUser && <span className="ai-avatar"><Sparkles size={15}/></span>}<div className="message-body"><div className="message-bubble">{message.content}</div>{items.length > 0 && <div className="chat-recommendations"><span className="eyebrow">MẤY GỢI Ý ĐẦU TIÊN</span>{items.map((item) => <article className="chat-rec-card" key={item.id}><button onClick={() => openItem(item)} className="chat-rec-art" style={{ backgroundImage: `url("${item.image}")` }} aria-label={`Xem ${item.title}`}>{item.emoji}</button><div className="chat-rec-info"><span className="eyebrow">{item.eyebrow}</span><button className="chat-rec-title" onClick={() => openItem(item)}><b>{item.title}</b></button><small>{item.year || item.duration} · {item.match}% hợp gu</small><p>{item.why}</p></div><button className={`icon-button ${saved.some((entry) => entry.id === item.id) ? 'on' : ''}`} onClick={() => toggleSaved(item)} title="Lưu vào danh sách"><Bookmark size={16}/></button></article>)}</div>}</div></div>
+  return <div className={`chat-message ${isUser ? 'from-user' : 'from-ai'}`}>{!isUser && <span className="ai-avatar"><Sparkles size={15}/></span>}<div className="message-body"><div className="message-bubble">{message.content}</div>{items.length > 0 && <div className="chat-recommendations"><span className="eyebrow">MẤY GỢI Ý ĐẦU TIÊN</span>{items.map((item) => <article className="chat-rec-card" key={item.id}><button onClick={() => openItem(item)} className="chat-rec-art" aria-label={`Xem ${item.title}`}><ChatPoster item={item}/></button><div className="chat-rec-info"><span className="eyebrow">{item.eyebrow}</span><button className="chat-rec-title" onClick={() => openItem(item)}><b>{item.title}</b></button><small>{item.year || item.duration} · {item.match}% hợp gu</small><p>{item.why}</p></div><button className={`icon-button ${saved.some((entry) => entry.id === item.id) ? 'on' : ''}`} onClick={() => toggleSaved(item)} title="Lưu vào danh sách"><Bookmark size={16}/></button></article>)}</div>}</div></div>
+}
+
+function ChatPoster({ item }: { item: MediaItem }) {
+  if (!item.image) return null
+  return <img
+    src={item.image}
+    alt=""
+    loading="lazy"
+    decoding="async"
+    onError={(event) => {
+      const image = event.currentTarget
+      if (item.fallbackImage && image.dataset.fallback !== 'true') {
+        image.dataset.fallback = 'true'
+        image.src = item.fallbackImage
+      } else {
+        image.remove()
+      }
+    }}
+  />
 }
 
 function AuthPage({ mode, onSignIn }: { mode: 'login' | 'register'; onSignIn: (token: string) => void }) {

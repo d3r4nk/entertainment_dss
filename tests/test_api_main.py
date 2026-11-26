@@ -100,6 +100,31 @@ def test_health_ok(pipeline_api) -> None:
     assert body["profile"] == "tiny"
 
 
+def test_poster_endpoint_returns_image_and_rejects_other_domains(pipeline_api) -> None:
+    from concurrent.futures import Future
+
+    client, _pipeline = pipeline_api(no_graph=True)
+    requested = []
+
+    class _PosterService:
+        def poster_for(self, item):
+            requested.append(item)
+            image = Future()
+            image.set_result(b"poster-bytes")
+            return image
+
+    client.app.state.recommendation_media = _PosterService()
+
+    response = client.get("/media/movie/123")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert response.content == b"poster-bytes"
+    assert requested == [{"domain": "movie", "id": "123"}]
+    assert client.get("/media/book/123").status_code == 404
+
+
 def test_health_degraded_when_ollama_down(pipeline_api, monkeypatch) -> None:
     from entdec.nlp.ollama_client import OllamaClient
 

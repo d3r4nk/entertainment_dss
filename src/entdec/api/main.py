@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from fastapi import Query, Request, Response
@@ -210,6 +211,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
     from entdec.graph.neo4j_client import Neo4jClient
     from entdec.logging_setup import get_logger
     from entdec.nlp.ollama_client import OllamaClient
+    from entdec.ui.recommendation_media import RecommendationMedia
 
     logger = get_logger(__name__)
     cfg = cfg or get_config()
@@ -230,6 +232,10 @@ def create_app(cfg=None, *, no_graph: bool = False):
     )
     app.state.graph_enabled = graph_enabled
     app.state.pipeline = None
+    app.state.recommendation_media = RecommendationMedia(
+        cfg.raw_path("movie", "links.csv"),
+        cfg.env.tmdb_read_access_token,
+    )
 
     def pipeline_for_request():
         if app.state.pipeline is None:
@@ -543,6 +549,25 @@ def create_app(cfg=None, *, no_graph: bool = False):
             "loaded_models": loaded,
             "profile": cfg.profile.name,
         }
+
+    @app.get("/media/{domain}/{item_id}")
+    def recommendation_poster(domain: str, item_id: str) -> Response:
+        if domain not in ("movie", "game"):
+            raise HTTPException(status_code=404, detail="Poster not found.")
+        image = app.state.recommendation_media.poster_for({"domain": domain, "id": item_id})
+        if image is None:
+            raise HTTPException(status_code=404, detail="Poster not found.")
+        try:
+            content = image.result(timeout=8)
+        except FutureTimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Poster source timed out.") from exc
+        if content is None:
+            raise HTTPException(status_code=404, detail="Poster not found.")
+        return Response(
+            content=content,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @app.post("/chat")
     def chat(body: ChatIn, request: Request) -> dict:

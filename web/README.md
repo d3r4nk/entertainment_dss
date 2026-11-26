@@ -28,9 +28,9 @@ npm ci
 npm run dev
 ```
 
-Mở địa chỉ Vite in ra trong terminal, thường là <http://127.0.0.1:5173/>. Chế độ demo được bật mặc định khi chạy `npm run dev`, không cần API, cơ sở dữ liệu hay tài khoản thật. Chọn **Dùng thử không cần tài khoản** ở trang đăng nhập để xem các trang chatbot, lịch sử, nội dung đã lưu và hồ sơ. Demo dùng dữ liệu mẫu trong trình duyệt.
+Mở địa chỉ Vite in ra trong terminal, thường là <http://127.0.0.1:5173/>. Nếu chưa tạo `web/.env`, chế độ demo được bật mặc định khi chạy `npm run dev`, không cần API, cơ sở dữ liệu hay tài khoản thật. Chọn **Dùng thử không cần tài khoản** ở trang đăng nhập để xem ứng dụng; hội thoại demo chỉ dùng dữ liệu mẫu trong trình duyệt, không lưu vào database của chatbot.
 
-Nếu đã tạo `web/.env` và đặt `VITE_DEMO_MODE=false`, hãy bỏ dòng đó hoặc đổi thành `true`, sau đó khởi động lại Vite.
+Để bật demo khi đã cấu hình `web/.env`, đặt `VITE_DEMO_MODE=true`, sau đó khởi động lại Vite.
 
 ## 2. Build và xem bản production
 
@@ -87,12 +87,13 @@ Giữ terminal này mở. Kiểm tra API tại <http://127.0.0.1:8000/docs>. `--
 Mở terminal PowerShell thứ hai:
 
 ```powershell
-cd web
+Set-Location D:\Entertainment_decision\web
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm ci
 npm run dev
 ```
 
-`web/.env` trên máy đã được chuẩn bị để gọi API thật. Nội dung cần có trong file này:
+File `web/.env.example` cấu hình web dùng API thật:
 
 ```dotenv
 VITE_DEMO_MODE=false
@@ -100,7 +101,7 @@ VITE_API_BASE_URL=/api
 ENTDEC_API_URL=http://127.0.0.1:8000
 ```
 
-Mở <http://127.0.0.1:5173/> rồi đăng ký tài khoản. Luồng đăng ký yêu cầu xác nhận TOTP. Vite proxy `/api/...` đến FastAPI và bỏ tiền tố `/api`.
+Lệnh `Copy-Item` chỉ cần chạy lần đầu; nếu `web/.env` đã tồn tại, không ghi đè file đó. Mở <http://127.0.0.1:5173/> rồi đăng ký tài khoản. Luồng đăng ký yêu cầu xác nhận TOTP. Vite proxy `/api/...` đến FastAPI và bỏ tiền tố `/api`. Nếu vừa đổi file `.env`, hãy dừng rồi chạy lại Vite để nạp cấu hình.
 
 ### Nếu muốn dùng MySQL Docker của dự án
 
@@ -108,10 +109,12 @@ Docker Compose ánh xạ MySQL ra cổng `3307`; khi đó cập nhật URL trong
 
 ## 4. Phần web và backend cần khớp nhau
 
+- Web không kết nối database trực tiếp: web gọi FastAPI qua `/api`. Với cấu hình xác thực bật, FastAPI lưu tài khoản, lịch sử hội thoại/tin nhắn và trạng thái tài khoản vào MySQL (`users`, `conversations`, `messages`, `account_state`). Chatbot recommender dùng Neo4j riêng cho knowledge graph/nội dung; đó là database khác theo thiết kế, không phải nơi lưu lịch sử chat.
 - Web gọi các route xác thực `/auth/*`, trạng thái tài khoản `/account/state`, hội thoại `/conversations/*` và trace `/traces/*`. Trạng thái tài khoản gồm mục đã lưu, đã trải nghiệm, đánh giá, sở thích và cài đặt; backend lưu theo user trong bảng MySQL `account_state`.
 - API khởi tạo recommender khi nhận yêu cầu AI qua `/chat`, `/recommend` hoặc tin nhắn hội thoại. Nếu mô hình/dữ liệu AI chưa sẵn sàng, API trả lỗi 503 giải thích tình trạng; các route tài khoản vẫn hoạt động.
+- Ảnh danh mục mẫu trên trang chủ được khai báo trong `web/src/data.ts`: phim dùng poster TMDB, game dùng artwork Steam; Stardew Valley dùng ảnh artwork đi kèm trong `web/public/image`. Ảnh gợi ý động được tải qua API `/media/{domain}/{id}`; poster phim cần `TMDB_READ_ACCESS_TOKEN` ở backend và file `links.csv`, còn game dùng artwork Steam. Nếu không tải được ảnh, web chỉ dùng ảnh dự phòng khi khớp đúng nội dung mẫu, tránh hiển thị nhầm poster.
 - Backend hiện chỉ nhận domain `movie` và `game`. Các danh mục còn lại trên web được đánh dấu **Sắp ra mắt** và không gửi yêu cầu gợi ý đến backend.
-- Ảnh nội dung trang chủ và thẻ gợi ý nằm trong `web/public/image`; đường dẫn hiển thị được khai báo ở `web/src/data.ts`.
+- Các artwork minh họa/dự phòng nằm trong `web/public/image`; đường dẫn và nguồn ảnh danh mục được khai báo ở `web/src/data.ts`.
 - Khi đăng nhập lần đầu sau cập nhật, web nhập mục đã lưu, đánh giá, sở thích và cài đặt cũ từ `localStorage` nếu MySQL chưa có trạng thái cho tài khoản; các lần sau MySQL là nguồn dữ liệu chính.
 - Khi triển khai web ở môi trường khác, cấu hình máy chủ tĩnh để trả về `index.html` cho các đường dẫn SPA như `/explore`, `/saved` và `/account`. Đồng thời đặt `VITE_API_BASE_URL` phù hợp với địa chỉ API hoặc reverse proxy trước khi chạy `npm run build`.
 
