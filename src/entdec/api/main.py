@@ -16,6 +16,7 @@ resident in VRAM at a time.
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 import time
 import uuid
@@ -120,6 +121,12 @@ class Login2FAIn(BaseModel):
     code: str
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+
 class PreAuthOut(BaseModel):
     preauth_token: str
     requires_2fa: bool = True
@@ -182,6 +189,10 @@ class ChatTurnOut(BaseModel):
     result: dict[str, Any]
 
 
+class AccountStateIn(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(cfg=None, *, no_graph: bool = False):
     """Build the FastAPI application (state cached on ``app.state``)."""
     try:
@@ -193,8 +204,8 @@ def create_app(cfg=None, *, no_graph: bool = False):
 
     from entdec.auth.conversations import ConversationService
     from entdec.auth.database import init_db, make_engine, make_session_factory
+    from entdec.auth.models import AccountState
     from entdec.auth.service import AuthError, AuthService
-    from entdec.chatbot.pipeline import ChatPipeline
     from entdec.config import get_config
     from entdec.graph.neo4j_client import Neo4jClient
     from entdec.logging_setup import get_logger
@@ -207,13 +218,32 @@ def create_app(cfg=None, *, no_graph: bool = False):
     app = FastAPI(title="Entertainment_decision recommender", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
+        allow_origins=[
+            "http://localhost:8501",
+            "http://127.0.0.1:8501",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.graph_enabled = graph_enabled
-    app.state.pipeline = ChatPipeline(cfg, use_graph=graph_enabled)
+    app.state.pipeline = None
+
+    def pipeline_for_request():
+        if app.state.pipeline is None:
+            try:
+                from entdec.chatbot.pipeline import ChatPipeline
+
+                app.state.pipeline = ChatPipeline(cfg, use_graph=graph_enabled)
+            except Exception as exc:  # AI assets/services are optional for account APIs.
+                logger.warning("AI recommender is unavailable: %s", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Môi trường AI chưa sẵn sàng. Hội thoại và dữ liệu tài khoản vẫn sử dụng được.",
+                ) from exc
+        return app.state.pipeline
     app.state.sessions = SessionStore(
         ttl_minutes=int(cfg.get("llm.session_ttl_minutes", 60)),
         max_sessions=int(cfg.get("llm.max_sessions", 100)),
@@ -353,6 +383,54 @@ def create_app(cfg=None, *, no_graph: bool = False):
     def auth_me(user: dict = Depends(current_user)) -> dict:  # noqa: B008
         return user
 
+    @app.post("/auth/password", status_code=204)
+    def auth_change_password(
+        body: ChangePasswordIn,
+        request: Request,
+        user: dict = Depends(current_user),  # noqa: B008
+    ) -> Response:
+        if body.new_password != body.confirm_password:
+            raise HTTPException(status_code=422, detail="Passwords do not match.")
+        if not app.state.auth_enabled:
+            raise HTTPException(status_code=404, detail="Authentication is disabled.")
+        app.state.auth_service.change_password(
+            user["id"],
+            body.current_password,
+            body.new_password,
+            ip=request_ip(request),
+        )
+        return Response(status_code=204)
+
+    @app.get("/account/state")
+    def get_account_state(user: dict = Depends(current_user)) -> dict:
+        require_auth_enabled()
+        with app.state.auth_sessions() as db:
+            row = db.get(AccountState, user["id"])
+            if row is None:
+                return {"payload": {}, "updated_at": None}
+            try:
+                payload = json.loads(row.payload_json)
+            except (TypeError, ValueError):
+                payload = {}
+            return {"payload": payload, "updated_at": row.updated_at.isoformat()}
+
+    @app.put("/account/state")
+    def put_account_state(
+        body: AccountStateIn, user: dict = Depends(current_user)
+    ) -> dict:
+        require_auth_enabled()
+        from datetime import UTC, datetime
+
+        with app.state.auth_sessions() as db, db.begin():
+            row = db.get(AccountState, user["id"])
+            if row is None:
+                row = AccountState(user_id=user["id"], payload_json="{}")
+                db.add(row)
+            row.payload_json = json.dumps(body.payload, ensure_ascii=False)
+            row.updated_at = datetime.now(UTC)
+            db.flush()
+            return {"payload": body.payload, "updated_at": row.updated_at.isoformat()}
+
     @app.get("/conversations", response_model=ConversationListOut)
     def list_conversations(
         offset: int = 0,
@@ -413,7 +491,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
                 user["id"],
                 conversation_id,
                 body.message,
-                app.state.pipeline,
+                pipeline_for_request(),
                 language=body.language,
             )
 
@@ -481,7 +559,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
                     user["id"],
                     conversation_id,
                     body.message,
-                    app.state.pipeline,
+                    pipeline_for_request(),
                     language=body.language,
                 )
             payload = dict(turn["result"])
@@ -495,7 +573,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
             else None
         )
         with _LLM_LOCK:
-            result = app.state.pipeline.run(
+            result = pipeline_for_request().run(
                 body.message, language=body.language, session=session
             )
         payload = result.as_dict()
@@ -520,7 +598,7 @@ def create_app(cfg=None, *, no_graph: bool = False):
             raise HTTPException(status_code=400, detail="domain must be movie or game")
         logger.info("/recommend query_chars=%d domain=%s", len(body.query), body.domain)
         with _LLM_LOCK:
-            result = app.state.pipeline.recommend(
+            result = pipeline_for_request().recommend(
                 body.query, domain=body.domain, k=body.k
             )
         payload = result.as_dict()
@@ -554,4 +632,4 @@ def run(cfg, args: argparse.Namespace | None = None) -> int:  # pragma: no cover
     return 0
 
 
-__all__ = ["ChatIn", "RecommendIn", "create_app", "run"]
+__all__ = ["ChangePasswordIn", "ChatIn", "RecommendIn", "create_app", "run"]

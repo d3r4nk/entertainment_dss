@@ -337,6 +337,29 @@ class AuthService:
                 ip=ip,
             )
 
+    def change_password(
+        self,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        *,
+        ip: str | None = None,
+    ) -> None:
+        """Change an authenticated user's password and revoke every session."""
+        with self.sessions() as db, db.begin():
+            user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+            if user is None or not user.is_active:
+                raise AuthError(401, "Authentication required.")
+            self._limit("password_change", user.email, ip)
+            if not self._verify_password(current_password, user.password_hash):
+                _audit(db, "password_change_fail", user_id=user.id, email=user.email, ip=ip)
+                raise AuthError(401, "Current password is incorrect.")
+            self._validate_password(user.email, new_password)
+            user.password_hash = self._password_hasher.hash(new_password)
+            db.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+            db.execute(delete(PreAuthToken).where(PreAuthToken.user_id == user.id))
+            _audit(db, "password_change", user_id=user.id, email=user.email, ip=ip)
+
     def list_users(self) -> list[dict[str, Any]]:
         """Return non-secret user details for local administration."""
         with self.sessions() as db:

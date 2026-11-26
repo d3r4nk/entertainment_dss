@@ -9,7 +9,6 @@ sequential embedding/generation rule applies.
 from __future__ import annotations
 
 import sys
-from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -19,7 +18,6 @@ TITLE = "🎥🎬 Entertainment chatbot"
 DESCRIPTION = (
     "Hỏi về phim hoặc game dưới bằng tiếng Việt/Anh "
 )
-PendingImages = list[tuple[Any, Future[bytes | None]]]
 
 
 def _render_saved_message(
@@ -28,7 +26,6 @@ def _render_saved_message(
     *,
     conversation_id: str | None = None,
     media: RecommendationMedia | None = None,
-    pending_images: PendingImages | None = None,
 ) -> None:
     st.write(message["content"])
     if message["role"] != "assistant" or not message.get("meta"):
@@ -47,16 +44,43 @@ def _render_saved_message(
         st.caption("Resolved references: " + ", ".join(references))
     items = meta.get("items", [])
     if items:
-        _render_recommendation_cards(st, items[:3], media, pending_images)
+        _render_recommendation_cards(st, items[:3], media)
     graph = "yes" if meta.get("used_graph") else "no (parquet fallback)"
     intent = "LLM" if meta.get("intent_llm") else "rules"
     answer = "LLM" if meta.get("answer_llm") else "template"
     st.caption(f"graph: {graph} · intent: {intent} · answer: {answer}")
 
 
-def _render_recommendation_cards(st, items, media, pending_images):
-    columns = st.columns(len(items))
-    for index, (column, item) in enumerate(zip(columns, items, strict=True), start=1):
+def _render_recommendation_cards(st, items, media):
+    cards = [(item, media.for_item(item) if media else None) for item in items]
+    has_pending_images = any(
+        card is not None and card.image is not None and not card.image.done()
+        for _, card in cards
+    )
+
+    if has_pending_images:
+        @st.fragment(run_every="1s")
+        def render_cards():
+            # The fragment owns all of its elements. Never retain Streamlit
+            # containers created by the parent app run across fragment reruns.
+            if not any(
+                card is not None and card.image is not None and not card.image.done()
+                for _, card in cards
+            ):
+                # Re-render the app once so the completed cards are rendered
+                # normally and this periodic fragment is removed.
+                st.rerun()
+            _render_recommendation_cards_content(st, cards)
+
+        render_cards()
+        return
+
+    _render_recommendation_cards_content(st, cards)
+
+
+def _render_recommendation_cards_content(st, cards):
+    columns = st.columns(len(cards))
+    for index, (column, (item, card)) in enumerate(zip(columns, cards, strict=True), start=1):
         with column:
             themes = item.get("shared_themes", [])
             genres = item.get("shared_genres", [])
@@ -65,18 +89,15 @@ def _render_recommendation_cards(st, items, media, pending_images):
             score_suffix = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
             st.markdown(f"**{index}. {item.get('title', 'Recommendation')}**")
             st.caption(evidence + score_suffix)
-            card = media.for_item(item) if media else None
             if card is not None:
                 if card.label and card.url:
                     st.link_button(card.label, card.url)
                 with st.container(border=True):
-                    slot = st.empty()
-                    if card.image is not None and not card.image.done() and pending_images is not None:
-                        slot.caption("Đang tải ảnh…")
-                        pending_images.append((slot, card.image))
+                    if card.image is not None and not card.image.done():
+                        st.caption("Đang tải ảnh…")
                     else:
                         image = card.image.result() if card.image and card.image.done() else None
-                        _render_card_image(slot, image)
+                        _render_card_image(st, image)
             if item.get("evidence"):
                 with st.expander("Evidence"):
                     st.write(item["evidence"])
@@ -87,24 +108,6 @@ def _render_card_image(slot, image: bytes | None) -> None:
         slot.image(image)
     else:
         slot.caption("Chưa có ảnh minh hoạ")
-
-
-def _refresh_card_images(st, pending_images: PendingImages) -> None:
-    if not pending_images:
-        return
-
-    @st.fragment(run_every="1s")
-    def poll():
-        # Each slot is a single element placeholder from the current chat render.
-        still_loading = []
-        for slot, image in pending_images:
-            if image.done():
-                _render_card_image(slot, image.result())
-            else:
-                still_loading.append((slot, image))
-        pending_images[:] = still_loading
-
-    poll()
 
 
 def _clear_trace_selection(st):
@@ -456,7 +459,6 @@ def main() -> None:  # pragma: no cover - interactive
 
             with st.container(key="entdec_chat_scroll", height=DEFAULT_PANE_HEIGHT, border=True):
                 with st.container(key="entdec_chat_content"):
-                    pending_images: PendingImages = []
                     if conversation:
                         for message in conversation["messages"]:
                             with st.chat_message(message["role"]):
@@ -465,11 +467,9 @@ def main() -> None:  # pragma: no cover - interactive
                                     message,
                                     conversation_id=conversation_id,
                                     media=media,
-                                    pending_images=pending_images,
                                 )
                     else:
                         st.caption("Start a new chat or choose one from your conversation history.")
-                    _refresh_card_images(st, pending_images)
                     active = False
                     if conversation_id:
                         active = any(

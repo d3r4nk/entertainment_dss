@@ -13,13 +13,19 @@ from pathlib import Path
 from threading import Lock
 from time import monotonic
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image, ImageOps
 from pydantic import SecretStr
 
 _MOVIE_POSTER = re.compile(r"/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp)")
+_STEAM_IMAGE_HOSTS = ("cdn.cloudflare.steamstatic.com", "cdn.akamai.steamstatic.com")
+_STEAM_IMAGE_VARIANTS = (
+    "header.jpg",
+    "capsule_616x353.jpg",
+    "library_600x900.jpg",
+    "library_hero.jpg",
+)
 _POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="card-media")
 _CACHE_SIZE = 128
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024
@@ -59,14 +65,25 @@ def _movie_ids(path: Path, _modified_ns: int) -> dict[int, int]:
         return {}
 
 
+def _image_urls(domain: str, item_id: int, token: SecretStr | None) -> tuple[str, ...]:
+    if domain == "movie":
+        if not token:
+            return ()
+        return (f"https://api.themoviedb.org/3/movie/{item_id}",)
+
+    return tuple(
+        f"https://{host}/steam/apps/{item_id}/{variant}"
+        for variant in _STEAM_IMAGE_VARIANTS
+        for host in _STEAM_IMAGE_HOSTS
+    )
+
+
 def _image_url(
     client: httpx.Client, domain: str, item_id: int, token: SecretStr | None
 ) -> str | None:
     if domain == "movie":
-        if not token:
-            return None
         response = client.get(
-            f"https://api.themoviedb.org/3/movie/{item_id}",
+            _image_urls(domain, item_id, token)[0],
             headers={"Authorization": f"Bearer {token.get_secret_value()}"},
         )
         response.raise_for_status()
@@ -75,49 +92,50 @@ def _image_url(
             return f"https://image.tmdb.org/t/p/w500{path}"
         return None
 
-    response = client.get(
-        "https://store.steampowered.com/api/appdetails", params={"appids": item_id}
-    )
-    response.raise_for_status()
-    entry = response.json().get(str(item_id)) or {}
-    if not entry.get("success"):
-        return None
-    data = entry.get("data") or {}
-    url = data.get("header_image")
-    if _positive_id(data.get("steam_appid")) != item_id or not isinstance(url, str):
-        return None
-    parsed = urlsplit(url)
-    if (
-        parsed.scheme == "https"
-        and parsed.port in (None, 443)
-        and parsed.username is None
-        and (parsed.hostname or "").endswith(".steamstatic.com")
-    ):
-        return url
     return None
 
 
 def _load_thumbnail(domain: str, item_id: int, token: SecretStr | None) -> bytes | None:
     try:
         with httpx.Client(timeout=3.0) as client:
-            url = _image_url(client, domain, item_id, token)
-            if url is None:
-                return None
-            content = BytesIO()
-            with client.stream("GET", url) as response:
-                response.raise_for_status()
-                for chunk in response.iter_bytes():
-                    if content.tell() + len(chunk) > _MAX_IMAGE_BYTES:
-                        return None
-                    content.write(chunk)
-            content.seek(0)
-            with Image.open(content) as image:
-                if image.width * image.height > 8_000_000:
+            if domain == "movie":
+                url = _image_url(client, domain, item_id, token)
+                if url is None:
                     return None
-                thumbnail = ImageOps.pad(image.convert("RGB"), (320, 180), color="#27272a")
-                result = BytesIO()
-                thumbnail.save(result, format="JPEG", quality=85)
-                return result.getvalue()
+                urls = (url,)
+            else:
+                urls = _image_urls(domain, item_id, token)
+            for url in urls:
+                try:
+                    content = BytesIO()
+                    with client.stream(
+                        "GET",
+                        url,
+                        headers={"Authorization": f"Bearer {token.get_secret_value()}"}
+                        if domain == "movie" and token else None,
+                    ) as response:
+                        response.raise_for_status()
+                        for chunk in response.iter_bytes():
+                            if content.tell() + len(chunk) > _MAX_IMAGE_BYTES:
+                                content = None
+                                break
+                            content.write(chunk)
+                    if content is None:
+                        continue
+                    content.seek(0)
+                    with Image.open(content) as image:
+                        if image.width * image.height > 8_000_000:
+                            continue
+                        thumbnail = ImageOps.pad(image.convert("RGB"), (320, 180), color="#27272a")
+                        result = BytesIO()
+                        thumbnail.save(result, format="JPEG", quality=85)
+                        return result.getvalue()
+                except (
+                    httpx.HTTPError, ValueError, OSError, SyntaxError,
+                    Image.DecompressionBombError,
+                ):
+                    continue
+            return None
     except (
         httpx.HTTPError, ValueError, AttributeError, OSError, SyntaxError,
         Image.DecompressionBombError,

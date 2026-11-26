@@ -115,6 +115,20 @@ class Conversation(Base):
     )
 
 
+class AccountState(Base):
+    """Per-user web preferences and saved media, stored as a versioned JSON document."""
+
+    __tablename__ = "account_state"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 class Message(Base):
     __tablename__ = "messages"
 
