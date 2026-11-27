@@ -25,9 +25,14 @@ def _render_saved_message(
     message: dict[str, Any],
     *,
     conversation_id: str | None = None,
+    trace_id: str | None = None,
     media: RecommendationMedia | None = None,
 ) -> None:
     st.write(message["content"])
+    if message["role"] == "user" and conversation_id and trace_id:
+        from entdec.ui.query_trace import trace_button
+
+        trace_button(st, conversation_id, trace_id, key=f"user_trace_{message['id']}")
     if message["role"] != "assistant" or not message.get("meta"):
         return
 
@@ -460,12 +465,22 @@ def main() -> None:  # pragma: no cover - interactive
             with st.container(key="entdec_chat_scroll", height=DEFAULT_PANE_HEIGHT, border=True):
                 with st.container(key="entdec_chat_content"):
                     if conversation:
-                        for message in conversation["messages"]:
+                        messages = conversation["messages"]
+                        for index, message in enumerate(messages):
+                            next_message = messages[index + 1] if index + 1 < len(messages) else None
+                            next_meta = (next_message or {}).get("meta") or {}
+                            trace_id = (
+                                next_meta.get("trace_id")
+                                if message["role"] == "user"
+                                and (next_message or {}).get("role") == "assistant"
+                                else None
+                            )
                             with st.chat_message(message["role"]):
                                 _render_saved_message(
                                     st,
                                     message,
                                     conversation_id=conversation_id,
+                                    trace_id=trace_id,
                                     media=media,
                                 )
                     else:

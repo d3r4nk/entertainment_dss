@@ -9,6 +9,7 @@ export type MediaItem = {
   duration: string
   match: number
   description: string
+  shortDescription?: string
   why: string
   emoji: string
   image: string
@@ -30,6 +31,28 @@ export type Message = {
   content: string
   meta?: { items?: ApiRecommendation[]; [key: string]: unknown } | null
   created_at: string
+}
+export type TraceEvent = {
+  seq: number
+  stage: string
+  status: string
+  at?: string
+  elapsed_ms?: number
+  duration_ms?: number
+  text?: string
+  error?: string
+  [key: string]: unknown
+}
+export type TraceRun = {
+  trace_id: string
+  conversation_id: string
+  question: string
+  status: string
+  answer?: string
+  active_stage?: string
+  error?: string
+  events: TraceEvent[]
+  [key: string]: unknown
 }
 export type ApiRecommendation = {
   id?: string | number
